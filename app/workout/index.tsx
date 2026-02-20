@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
@@ -7,9 +7,12 @@ import { useStore } from '../../store/useStore';
 import {
   generateWorkoutPlan,
   getRecommendedParts,
+  exercises as allExercises,
   WorkoutPlan,
+  Exercise,
   BODY_PART_LABELS,
   BODY_PART_EMOJI,
+  BodyPart,
 } from '../../data/exercises';
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
@@ -28,6 +31,7 @@ export default function WorkoutScreen() {
   const [restTime, setRestTime] = useState(0);
   const [startTime] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [swapIndex, setSwapIndex] = useState<number | null>(null); // For exercise swap modal
 
   // Generate workout plan
   useEffect(() => {
@@ -127,8 +131,41 @@ export default function WorkoutScreen() {
     return `${m}:${String(s).padStart(2, '0')}`;
   };
 
+  // ===== Customize Handlers =====
+  const handleRemoveExercise = (index: number) => {
+    if (!plan || plan.exercises.length <= 2) return;
+    const updated = { ...plan, exercises: plan.exercises.filter((_, i) => i !== index) };
+    setPlan(updated);
+  };
+
+  const handleSwapExercise = (newEx: Exercise) => {
+    if (!plan || swapIndex === null) return;
+    const old = plan.exercises[swapIndex];
+    const updated = {
+      ...plan,
+      exercises: plan.exercises.map((item, i) =>
+        i === swapIndex
+          ? { ...item, exercise: newEx, sets: newEx.defaultSets, reps: newEx.defaultReps, restSeconds: newEx.restSeconds }
+          : item
+      ),
+    };
+    setPlan(updated);
+    setSwapIndex(null);
+  };
+
+  const getSwapCandidates = (): Exercise[] => {
+    if (!plan || swapIndex === null) return [];
+    const currentEx = plan.exercises[swapIndex].exercise;
+    const currentIds = plan.exercises.map((e) => e.exercise.id);
+    return allExercises.filter(
+      (e) => e.bodyPart === currentEx.bodyPart && !currentIds.includes(e.id)
+    );
+  };
+
   // ===== Preview Phase =====
   if (phase === 'preview') {
+    const swapCandidates = getSwapCandidates();
+
     return (
       <SafeAreaView style={styles.container}>
         <ScrollView showsVerticalScrollIndicator={false}>
@@ -140,6 +177,7 @@ export default function WorkoutScreen() {
 
           <View style={styles.planHeader}>
             <Text style={styles.planTitle}>{plan.name}</Text>
+            <Text style={styles.customHint}>운동을 탭하여 교체하거나 X로 삭제하세요</Text>
             <View style={styles.planStats}>
               <Text style={styles.planStat}>🏋️ {totalExercises}개 운동</Text>
               <Text style={styles.planStat}>⏱️ ~{plan.estimatedMinutes}분</Text>
@@ -149,16 +187,21 @@ export default function WorkoutScreen() {
 
           {plan.exercises.map((item, i) => (
             <View key={item.exercise.id + i} style={styles.previewCard}>
-              <View style={styles.previewNumber}>
+              <TouchableOpacity style={styles.previewNumber} onPress={() => setSwapIndex(i)}>
                 <Text style={styles.previewNumberText}>{i + 1}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1 }} onPress={() => setSwapIndex(i)}>
                 <Text style={styles.previewName}>{item.exercise.name}</Text>
                 <Text style={styles.previewDetail}>
                   {BODY_PART_EMOJI[item.exercise.bodyPart]} {BODY_PART_LABELS[item.exercise.bodyPart]}
                   {'  '}|{'  '}{item.sets}세트 x {item.reps}
                 </Text>
-              </View>
+              </TouchableOpacity>
+              {plan.exercises.length > 2 && (
+                <TouchableOpacity onPress={() => handleRemoveExercise(i)} style={styles.removeBtn}>
+                  <Text style={styles.removeBtnText}>✕</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
 
@@ -168,6 +211,47 @@ export default function WorkoutScreen() {
 
           <View style={{ height: Spacing.xxl }} />
         </ScrollView>
+
+        {/* Swap Modal */}
+        <Modal visible={swapIndex !== null} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>운동 교체</Text>
+                <TouchableOpacity onPress={() => setSwapIndex(null)}>
+                  <Text style={styles.modalClose}>닫기</Text>
+                </TouchableOpacity>
+              </View>
+              {swapIndex !== null && (
+                <Text style={styles.modalSubtitle}>
+                  {plan.exercises[swapIndex].exercise.name} → 같은 부위 다른 운동
+                </Text>
+              )}
+              {swapCandidates.length === 0 ? (
+                <Text style={styles.modalEmpty}>교체 가능한 운동이 없습니다</Text>
+              ) : (
+                <FlatList
+                  data={swapCandidates}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity style={styles.swapItem} onPress={() => handleSwapExercise(item)}>
+                      <Text style={styles.swapEmoji}>{BODY_PART_EMOJI[item.bodyPart]}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.swapName}>{item.name}</Text>
+                        <Text style={styles.swapDetail}>
+                          {item.equipment === 'bodyweight' ? '맨몸' : item.equipment} | {item.defaultSets}세트 x {item.defaultReps}
+                        </Text>
+                      </View>
+                      <Text style={styles.swapDiff}>
+                        {item.difficulty === 'beginner' ? '🌱' : item.difficulty === 'intermediate' ? '🌿' : '🌳'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -427,4 +511,37 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md, paddingHorizontal: Spacing.xxl,
   },
   homeBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
+
+  // Customize
+  customHint: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.xs },
+  removeBtn: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  removeBtnText: { color: Colors.accent, fontSize: FontSize.sm, fontWeight: '700' },
+
+  // Swap Modal
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.card, borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg,
+    maxHeight: '70%',
+  },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
+  modalTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
+  modalClose: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '600' },
+  modalSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.md },
+  modalEmpty: { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', padding: Spacing.xl },
+  swapItem: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  swapEmoji: { fontSize: 24 },
+  swapName: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  swapDetail: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
+  swapDiff: { fontSize: 18 },
 });
