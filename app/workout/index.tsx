@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import * as Speech from 'expo-speech';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
 import { useStore } from '../../store/useStore';
 import {
@@ -18,6 +19,15 @@ import {
 } from '../../data/exercises';
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
+
+// Voice coaching helper
+const speak = (text: string) => {
+  try {
+    Speech.speak(text, { language: 'ko-KR', rate: 0.9, pitch: 1.0 });
+  } catch (e) {
+    // Silently fail if TTS unavailable
+  }
+};
 
 export default function WorkoutScreen() {
   const profile = useStore((s) => s.profile);
@@ -54,6 +64,10 @@ export default function WorkoutScreen() {
             setIsTimerRunning(false);
             Vibration.vibrate(500);
             setPhase('exercise');
+            // Voice coaching when rest ends
+            try {
+              Speech.speak('가보자!', { language: 'ko-KR', rate: 1.0 });
+            } catch (e) {}
             return 0;
           }
           return prev - 1;
@@ -75,12 +89,19 @@ export default function WorkoutScreen() {
   const totalExercises = plan.exercises.length;
   const totalSets = plan.exercises.reduce((sum, e) => sum + e.setDetails.length, 0);
 
+  const [showGuide, setShowGuide] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+
   const handleStartWorkout = () => {
     setPhase('exercise');
     setCurrentExIndex(0);
     setCurrentSet(0);
     setTimer(0);
     setIsTimerRunning(true);
+    if (voiceEnabled) {
+      const ex = plan!.exercises[0].exercise;
+      speak(`운동을 시작합니다. 첫 번째, ${ex.name}. ${ex.voiceCoaching[0] || '화이팅!'}`);
+    }
   };
 
   const handleSetComplete = () => {
@@ -93,17 +114,26 @@ export default function WorkoutScreen() {
 
     if (currentSet < currentPlanItem.setDetails.length - 1) {
       // More sets remaining - start rest
-      setCurrentSet((prev) => prev + 1);
+      const nextSet = currentSet + 1;
+      setCurrentSet(nextSet);
       setRestTime(currentPlanItem.restSeconds);
       setPhase('rest');
       setIsTimerRunning(true);
+      if (voiceEnabled) {
+        speak(`${currentSet + 1}세트 완료! 잠시 쉬세요.`);
+      }
     } else if (currentExIndex < totalExercises - 1) {
       // Next exercise
-      setCurrentExIndex((prev) => prev + 1);
+      const nextIdx = currentExIndex + 1;
+      const nextEx = plan.exercises[nextIdx].exercise;
+      setCurrentExIndex(nextIdx);
       setCurrentSet(0);
       setRestTime(currentPlanItem.restSeconds + 15);
       setPhase('rest');
       setIsTimerRunning(true);
+      if (voiceEnabled) {
+        speak(`${currentPlanItem.exercise.name} 완료! 다음은 ${nextEx.name}입니다.`);
+      }
     } else {
       handleWorkoutComplete();
     }
@@ -115,6 +145,11 @@ export default function WorkoutScreen() {
     setRestTime(0);
     setPhase('exercise');
     setIsTimerRunning(true);
+    if (voiceEnabled) {
+      const ex = plan.exercises[currentExIndex].exercise;
+      const coaching = ex.voiceCoaching[currentSet % ex.voiceCoaching.length];
+      speak(coaching || '준비됐죠? 가보자!');
+    }
   };
 
   const handleWorkoutComplete = () => {
@@ -131,6 +166,11 @@ export default function WorkoutScreen() {
       duration,
       calories: plan.estimatedCalories,
     });
+
+    if (voiceEnabled) {
+      speak('운동 완료! 오늘도 해냈습니다. 정말 대단해요!');
+    }
+    Vibration.vibrate([0, 200, 100, 200, 100, 400]);
   };
 
   const formatTime = (seconds: number) => {
@@ -409,12 +449,56 @@ export default function WorkoutScreen() {
             />
           </View>
 
-          {/* Exercise tip card */}
-          <View style={styles.tipCard}>
-            <Text style={styles.tipCardText}>
-              {ex.tips[0] || ex.guide[0]}
-            </Text>
+          {/* Voice + Guide toggle */}
+          <View style={styles.toggleRow}>
+            <TouchableOpacity
+              style={[styles.toggleBtn, voiceEnabled && styles.toggleBtnActive]}
+              onPress={() => setVoiceEnabled(!voiceEnabled)}
+            >
+              <Text style={styles.toggleBtnText}>{voiceEnabled ? '🔊 음성 ON' : '🔇 음성 OFF'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleBtn, showGuide && styles.toggleBtnActive]}
+              onPress={() => setShowGuide(!showGuide)}
+            >
+              <Text style={styles.toggleBtnText}>📖 가이드</Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Exercise tip / guide card */}
+          {showGuide ? (
+            <View style={styles.guideCard}>
+              <Text style={styles.guideTitle}>운동 가이드</Text>
+              {ex.guide.map((step, i) => (
+                <View key={i} style={styles.guideStep}>
+                  <Text style={styles.guideStepNum}>{i + 1}</Text>
+                  <Text style={styles.guideStepText}>{step}</Text>
+                </View>
+              ))}
+              {ex.warnings.length > 0 && (
+                <View style={styles.warningBox}>
+                  <Text style={styles.warningTitle}>⚠️ 주의사항</Text>
+                  {ex.warnings.map((w, i) => (
+                    <Text key={i} style={styles.warningText}>• {w}</Text>
+                  ))}
+                </View>
+              )}
+              {ex.tips.length > 0 && (
+                <View style={styles.tipsBox}>
+                  <Text style={styles.tipsTitle}>💡 팁</Text>
+                  {ex.tips.map((t, i) => (
+                    <Text key={i} style={styles.tipsText}>• {t}</Text>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={styles.tipCard}>
+              <Text style={styles.tipCardText}>
+                {ex.tips[0] || ex.guide[0]}
+              </Text>
+            </View>
+          )}
 
           {/* Exercise Info */}
           <Text style={styles.exPhaseTitle}>{ex.name}</Text>
@@ -518,22 +602,58 @@ export default function WorkoutScreen() {
   }
 
   // ===== Complete Phase =====
+  const streak = useStore.getState().streak;
+  const bestStreak = useStore.getState().bestStreak;
+  const duration = Math.round((Date.now() - startTime) / 60000);
+  const completedSets = plan.exercises.reduce(
+    (sum, e) => sum + e.setDetails.filter((s) => s.completed).length, 0
+  );
+  const totalVolume = plan.exercises.reduce(
+    (sum, e) => sum + e.setDetails.reduce(
+      (s2, sd) => s2 + (sd.completed ? sd.weight * parseInt(sd.reps) || 0 : 0), 0
+    ), 0
+  );
+
+  const celebMessages = [
+    '대단해요! 오늘의 운동이 내일의 나를 만듭니다.',
+    '당신은 상위 10%의 꾸준함을 가진 사람입니다!',
+    '근육이 자라고 있어요. 느끼시나요?',
+    '포기하지 않은 당신이 진짜 승리자입니다!',
+    '오늘도 한계를 넘었습니다. 내일이 기대됩니다!',
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.completeContainer}>
+      <ScrollView contentContainerStyle={styles.completeContainer} showsVerticalScrollIndicator={false}>
         <Text style={styles.completeEmoji}>🎉</Text>
         <Text style={styles.completeTitle}>운동 완료!</Text>
-        <Text style={styles.completeSubtitle}>오늘도 해냈습니다!</Text>
+        <Text style={styles.completeMessage}>
+          {celebMessages[streak % celebMessages.length]}
+        </Text>
 
+        {/* Streak update */}
+        <View style={styles.streakUpdate}>
+          <Text style={styles.streakUpdateEmoji}>🔥</Text>
+          <Text style={styles.streakUpdateText}>{streak}일 연속 달성!</Text>
+          {streak === bestStreak && streak > 1 && (
+            <View style={styles.newRecordBadge}>
+              <Text style={styles.newRecordText}>NEW RECORD!</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Summary grid */}
         <View style={styles.completeSummary}>
           <View style={styles.completeStat}>
             <Text style={styles.completeStatValue}>{totalExercises}</Text>
             <Text style={styles.completeStatLabel}>운동</Text>
           </View>
           <View style={styles.completeStat}>
-            <Text style={styles.completeStatValue}>
-              {Math.round((Date.now() - startTime) / 60000)}
-            </Text>
+            <Text style={styles.completeStatValue}>{completedSets}</Text>
+            <Text style={styles.completeStatLabel}>세트</Text>
+          </View>
+          <View style={styles.completeStat}>
+            <Text style={styles.completeStatValue}>{duration}</Text>
             <Text style={styles.completeStatLabel}>분</Text>
           </View>
           <View style={styles.completeStat}>
@@ -542,10 +662,37 @@ export default function WorkoutScreen() {
           </View>
         </View>
 
+        {totalVolume > 0 && (
+          <View style={styles.volumeCard}>
+            <Text style={styles.volumeLabel}>총 볼륨</Text>
+            <Text style={styles.volumeValue}>{totalVolume.toLocaleString()} kg</Text>
+          </View>
+        )}
+
+        {/* Exercise breakdown */}
+        <View style={styles.breakdownCard}>
+          <Text style={styles.breakdownTitle}>운동 상세</Text>
+          {plan.exercises.map((item, i) => {
+            const doneSets = item.setDetails.filter((s) => s.completed).length;
+            return (
+              <View key={i} style={styles.breakdownRow}>
+                <Text style={styles.breakdownName}>
+                  {BODY_PART_EMOJI[item.exercise.bodyPart]} {item.exercise.name}
+                </Text>
+                <Text style={styles.breakdownDetail}>
+                  {doneSets}/{item.setDetails.length} 세트
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
         <TouchableOpacity style={styles.homeBtn} onPress={() => router.replace('/(tabs)')}>
           <Text style={styles.homeBtnText}>홈으로 돌아가기</Text>
         </TouchableOpacity>
-      </View>
+
+        <View style={{ height: Spacing.xxl }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -773,21 +920,83 @@ const styles = StyleSheet.create({
   },
   adText: { color: Colors.textMuted, fontSize: FontSize.sm },
 
+  // Toggle row
+  toggleRow: {
+    flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md,
+  },
+  toggleBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.full,
+  },
+  toggleBtnActive: {
+    backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.primary,
+  },
+  toggleBtnText: { color: Colors.textSecondary, fontSize: FontSize.xs, fontWeight: '600' },
+
+  // Guide card
+  guideCard: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  guideTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
+  guideStep: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xs },
+  guideStepNum: {
+    width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.primary,
+    textAlign: 'center', lineHeight: 20, fontSize: FontSize.xs, color: Colors.background, fontWeight: '700',
+  },
+  guideStepText: { flex: 1, fontSize: FontSize.sm, color: Colors.text, lineHeight: 20 },
+  warningBox: { marginTop: Spacing.sm, backgroundColor: '#2D1F00', borderRadius: BorderRadius.sm, padding: Spacing.sm },
+  warningTitle: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.warning, marginBottom: 4 },
+  warningText: { fontSize: FontSize.xs, color: Colors.warning, lineHeight: 18 },
+  tipsBox: { marginTop: Spacing.sm },
+  tipsTitle: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.primary, marginBottom: 4 },
+  tipsText: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 18 },
+
   // Complete Phase
-  completeContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.lg },
+  completeContainer: { flexGrow: 1, alignItems: 'center', padding: Spacing.lg, paddingTop: Spacing.xxl },
   completeEmoji: { fontSize: 80 },
   completeTitle: { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.text, marginTop: Spacing.md },
-  completeSubtitle: { fontSize: FontSize.md, color: Colors.textSecondary, marginTop: Spacing.xs },
+  completeMessage: { fontSize: FontSize.md, color: Colors.textSecondary, marginTop: Spacing.sm, textAlign: 'center', lineHeight: 22 },
+  streakUpdate: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.streakBg, borderRadius: BorderRadius.md, padding: Spacing.md,
+    marginTop: Spacing.lg, borderWidth: 1, borderColor: '#4D3500',
+  },
+  streakUpdateEmoji: { fontSize: 24 },
+  streakUpdateText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.streak },
+  newRecordBadge: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm, paddingVertical: 2,
+  },
+  newRecordText: { fontSize: FontSize.xs, fontWeight: '800', color: Colors.background },
   completeSummary: {
-    flexDirection: 'row', gap: Spacing.xl, marginTop: Spacing.xl,
-    backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.xl,
+    flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.lg, width: '100%',
+    justifyContent: 'space-around',
   },
   completeStat: { alignItems: 'center' },
-  completeStatValue: { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.primary },
-  completeStatLabel: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: 2 },
+  completeStatValue: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.primary },
+  completeStatLabel: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
+  volumeCard: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md, padding: Spacing.md,
+    marginTop: Spacing.md, width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  volumeLabel: { fontSize: FontSize.md, color: Colors.textSecondary, fontWeight: '600' },
+  volumeValue: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.primary },
+  breakdownCard: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    marginTop: Spacing.md, width: '100%',
+  },
+  breakdownTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text, marginBottom: Spacing.sm },
+  breakdownRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: Spacing.xs, borderBottomWidth: 1, borderBottomColor: Colors.surface,
+  },
+  breakdownName: { fontSize: FontSize.sm, color: Colors.text },
+  breakdownDetail: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600' },
   homeBtn: {
     marginTop: Spacing.xl, backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.xxl,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.xxl, width: '100%', alignItems: 'center',
   },
   homeBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
 
