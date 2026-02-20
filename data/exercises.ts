@@ -655,14 +655,17 @@ export const exercises: Exercise[] = [
 
 // ===== 운동 프로그램 생성 =====
 
+export interface WorkoutPlanItem {
+  exercise: Exercise;
+  sets: number;
+  reps: string;
+  weight: number; // kg, 0 for bodyweight
+  restSeconds: number;
+}
+
 export interface WorkoutPlan {
   name: string;
-  exercises: {
-    exercise: Exercise;
-    sets: number;
-    reps: string;
-    restSeconds: number;
-  }[];
+  exercises: WorkoutPlanItem[];
   estimatedMinutes: number;
   estimatedCalories: number;
 }
@@ -713,6 +716,7 @@ export function generateWorkoutPlan(
       exercise,
       sets,
       reps,
+      weight: exercise.equipment === 'bodyweight' ? 0 : 0, // User sets their own weight
       restSeconds: goal === 'lose' ? Math.max(30, exercise.restSeconds - 15) : exercise.restSeconds,
     };
   });

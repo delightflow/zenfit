@@ -4,6 +4,7 @@ import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
 import { useStore } from '../../store/useStore';
 import { router } from 'expo-router';
 import { getRecommendedParts, BODY_PART_LABELS, BODY_PART_EMOJI } from '../../data/exercises';
+import MotivationSimulation from '../../components/MotivationSimulation';
 
 const { width } = Dimensions.get('window');
 
@@ -171,6 +172,18 @@ export default function HomeScreen() {
         <StreakCard />
         <WeekView />
         <MotivationCard />
+
+        {/* Habit Simulation */}
+        {profile && (
+          <MotivationSimulation
+            streak={useStore.getState().streak}
+            todayCompleted={useStore.getState().todayCompleted}
+            goal={profile.goal}
+            currentWeight={profile.weight}
+            targetWeight={profile.targetWeight}
+          />
+        )}
+
         <TodayWorkout />
 
         <View style={{ height: Spacing.xxl }} />

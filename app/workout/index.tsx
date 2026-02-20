@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
@@ -9,6 +9,7 @@ import {
   getRecommendedParts,
   exercises as allExercises,
   WorkoutPlan,
+  WorkoutPlanItem,
   Exercise,
   BODY_PART_LABELS,
   BODY_PART_EMOJI,
@@ -32,6 +33,7 @@ export default function WorkoutScreen() {
   const [startTime] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [swapIndex, setSwapIndex] = useState<number | null>(null); // For exercise swap modal
+  const [editIndex, setEditIndex] = useState<number | null>(null); // For sets/reps/weight edit
 
   // Generate workout plan
   useEffect(() => {
@@ -140,17 +142,50 @@ export default function WorkoutScreen() {
 
   const handleSwapExercise = (newEx: Exercise) => {
     if (!plan || swapIndex === null) return;
-    const old = plan.exercises[swapIndex];
     const updated = {
       ...plan,
       exercises: plan.exercises.map((item, i) =>
         i === swapIndex
-          ? { ...item, exercise: newEx, sets: newEx.defaultSets, reps: newEx.defaultReps, restSeconds: newEx.restSeconds }
+          ? { ...item, exercise: newEx, sets: newEx.defaultSets, reps: newEx.defaultReps, weight: 0, restSeconds: newEx.restSeconds }
           : item
       ),
     };
     setPlan(updated);
     setSwapIndex(null);
+  };
+
+  // ===== Edit Handlers (sets/reps/weight) =====
+  const handleUpdateSets = (index: number, delta: number) => {
+    if (!plan) return;
+    const updated = {
+      ...plan,
+      exercises: plan.exercises.map((item, i) =>
+        i === index ? { ...item, sets: Math.max(1, Math.min(10, item.sets + delta)) } : item
+      ),
+    };
+    setPlan(updated);
+  };
+
+  const handleUpdateReps = (index: number, value: string) => {
+    if (!plan) return;
+    const updated = {
+      ...plan,
+      exercises: plan.exercises.map((item, i) =>
+        i === index ? { ...item, reps: value } : item
+      ),
+    };
+    setPlan(updated);
+  };
+
+  const handleUpdateWeight = (index: number, delta: number) => {
+    if (!plan) return;
+    const updated = {
+      ...plan,
+      exercises: plan.exercises.map((item, i) =>
+        i === index ? { ...item, weight: Math.max(0, item.weight + delta) } : item
+      ),
+    };
+    setPlan(updated);
   };
 
   const getSwapCandidates = (): Exercise[] => {
@@ -190,13 +225,60 @@ export default function WorkoutScreen() {
               <TouchableOpacity style={styles.previewNumber} onPress={() => setSwapIndex(i)}>
                 <Text style={styles.previewNumberText}>{i + 1}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={{ flex: 1 }} onPress={() => setSwapIndex(i)}>
-                <Text style={styles.previewName}>{item.exercise.name}</Text>
-                <Text style={styles.previewDetail}>
-                  {BODY_PART_EMOJI[item.exercise.bodyPart]} {BODY_PART_LABELS[item.exercise.bodyPart]}
-                  {'  '}|{'  '}{item.sets}세트 x {item.reps}
-                </Text>
-              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <TouchableOpacity onPress={() => setSwapIndex(i)}>
+                  <Text style={styles.previewName}>{item.exercise.name}</Text>
+                  <Text style={styles.previewDetail}>
+                    {BODY_PART_EMOJI[item.exercise.bodyPart]} {BODY_PART_LABELS[item.exercise.bodyPart]}
+                    {'  '}|{'  '}{item.exercise.equipment === 'bodyweight' ? '맨몸' : item.exercise.equipment}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Editable sets/reps/weight row */}
+                <View style={styles.editRow}>
+                  {/* Sets */}
+                  <View style={styles.editGroup}>
+                    <Text style={styles.editLabel}>세트</Text>
+                    <View style={styles.editControls}>
+                      <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateSets(i, -1)}>
+                        <Text style={styles.editBtnText}>-</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.editValue}>{item.sets}</Text>
+                      <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateSets(i, 1)}>
+                        <Text style={styles.editBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Reps */}
+                  <View style={styles.editGroup}>
+                    <Text style={styles.editLabel}>횟수</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={item.reps}
+                      onChangeText={(v) => handleUpdateReps(i, v)}
+                      keyboardType="default"
+                      selectTextOnFocus
+                    />
+                  </View>
+
+                  {/* Weight (only for non-bodyweight) */}
+                  {item.exercise.equipment !== 'bodyweight' && (
+                    <View style={styles.editGroup}>
+                      <Text style={styles.editLabel}>kg</Text>
+                      <View style={styles.editControls}>
+                        <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateWeight(i, -2.5)}>
+                          <Text style={styles.editBtnText}>-</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.editValue}>{item.weight}</Text>
+                        <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateWeight(i, 2.5)}>
+                          <Text style={styles.editBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              </View>
               {plan.exercises.length > 2 && (
                 <TouchableOpacity onPress={() => handleRemoveExercise(i)} style={styles.removeBtn}>
                   <Text style={styles.removeBtnText}>✕</Text>
@@ -297,6 +379,9 @@ export default function WorkoutScreen() {
               {currentSet} / {currentPlanItem.sets}
             </Text>
             <Text style={styles.repsText}>{currentPlanItem.reps} 회</Text>
+            {currentPlanItem.weight > 0 && (
+              <Text style={styles.weightText}>{currentPlanItem.weight} kg</Text>
+            )}
           </View>
 
           {/* Guide */}
@@ -450,6 +535,7 @@ const styles = StyleSheet.create({
   setLabel: { fontSize: FontSize.sm, color: Colors.textMuted },
   setCount: { fontSize: FontSize.hero, fontWeight: '800', color: Colors.primary },
   repsText: { fontSize: FontSize.lg, color: Colors.text, fontWeight: '600' },
+  weightText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: '600', marginTop: 2 },
 
   guideScroll: { flex: 1, marginTop: Spacing.lg },
   guideStep: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
@@ -511,6 +597,59 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md, paddingHorizontal: Spacing.xxl,
   },
   homeBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
+
+  // Edit controls
+  editRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+    alignItems: 'center',
+  },
+  editGroup: {
+    alignItems: 'center',
+  },
+  editLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    marginBottom: 2,
+  },
+  editControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  editBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editBtnText: {
+    color: Colors.primary,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  editValue: {
+    color: Colors.text,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    minWidth: 28,
+    textAlign: 'center',
+  },
+  editInput: {
+    backgroundColor: Colors.surface,
+    color: Colors.text,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    textAlign: 'center',
+    minWidth: 48,
+    height: 26,
+  },
 
   // Customize
   customHint: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.xs },
