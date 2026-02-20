@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
 import { useStore } from '../../store/useStore';
 import { router } from 'expo-router';
+import { getRecommendedParts, BODY_PART_LABELS, BODY_PART_EMOJI } from '../../data/exercises';
 
 const { width } = Dimensions.get('window');
 
@@ -106,9 +107,8 @@ function TodayWorkout() {
   const todayCompleted = useStore((s) => s.todayCompleted);
   const profile = useStore((s) => s.profile);
 
-  const targetParts = profile?.goal === 'lose'
-    ? ['유산소', '코어', '하체']
-    : ['가슴', '등', '어깨'];
+  const dayOfWeek = new Date().getDay();
+  const parts = profile ? getRecommendedParts(dayOfWeek, profile.goal) : [];
 
   return (
     <View style={styles.todayCard}>
@@ -120,9 +120,9 @@ function TodayWorkout() {
       </View>
 
       <View style={styles.todayParts}>
-        {targetParts.map((part) => (
+        {parts.map((part) => (
           <View key={part} style={styles.partChip}>
-            <Text style={styles.partChipText}>{part}</Text>
+            <Text style={styles.partChipText}>{BODY_PART_EMOJI[part]} {BODY_PART_LABELS[part]}</Text>
           </View>
         ))}
       </View>
@@ -130,21 +130,22 @@ function TodayWorkout() {
       <View style={styles.todayStats}>
         <View style={styles.todayStat}>
           <Text style={styles.todayStatIcon}>🏋️</Text>
-          <Text style={styles.todayStatValue}>6개 운동</Text>
+          <Text style={styles.todayStatValue}>5~6개 운동</Text>
         </View>
         <View style={styles.todayStat}>
           <Text style={styles.todayStatIcon}>⏱️</Text>
-          <Text style={styles.todayStatValue}>18세트</Text>
+          <Text style={styles.todayStatValue}>~30분</Text>
         </View>
         <View style={styles.todayStat}>
           <Text style={styles.todayStatIcon}>🔥</Text>
-          <Text style={styles.todayStatValue}>~450 kcal</Text>
+          <Text style={styles.todayStatValue}>~400 kcal</Text>
         </View>
       </View>
 
       <TouchableOpacity
         style={[styles.startButton, todayCompleted && styles.startButtonDone]}
         disabled={todayCompleted}
+        onPress={() => router.push('/workout')}
       >
         <Text style={styles.startButtonText}>
           {todayCompleted ? '✅ 오늘 운동 완료!' : '🚀 운동 시작하기'}
