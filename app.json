@@ -39,6 +39,22 @@
           "color": "#4EEEB0"
         }
       ]
-    ]
+    ],
+    "experiments": {
+      "baseUrl": "/zenfit"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6a2ef220-866f-4ab6-b66f-1b57226f7cdf"
+      }
+    },
+    "owner": "seungyeoljeon",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6a2ef220-866f-4ab6-b66f-1b57226f7cdf"
+    }
   }
 }
