@@ -655,11 +655,15 @@ export const exercises: Exercise[] = [
 
 // ===== 운동 프로그램 생성 =====
 
+export interface SetDetail {
+  weight: number; // kg, 0 for bodyweight
+  reps: string;   // "12" or "30초"
+  completed?: boolean;
+}
+
 export interface WorkoutPlanItem {
   exercise: Exercise;
-  sets: number;
-  reps: string;
-  weight: number; // kg, 0 for bodyweight
+  setDetails: SetDetail[]; // Per-set weight/reps (PlanFit style)
   restSeconds: number;
 }
 
@@ -712,17 +716,21 @@ export function generateWorkoutPlan(
       }
     }
 
+    const defaultWeight = exercise.equipment === 'bodyweight' ? 0 : 20; // Default 20kg for weighted exercises
+    const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({
+      weight: defaultWeight,
+      reps,
+    }));
+
     return {
       exercise,
-      sets,
-      reps,
-      weight: exercise.equipment === 'bodyweight' ? 0 : 0, // User sets their own weight
+      setDetails,
       restSeconds: goal === 'lose' ? Math.max(30, exercise.restSeconds - 15) : exercise.restSeconds,
     };
   });
 
-  const totalSets = plan.reduce((sum, p) => sum + p.sets, 0);
-  const estimatedCalories = plan.reduce((sum, p) => sum + p.exercise.caloriesPerSet * p.sets, 0);
+  const totalSets = plan.reduce((sum, p) => sum + p.setDetails.length, 0);
+  const estimatedCalories = plan.reduce((sum, p) => sum + p.exercise.caloriesPerSet * p.setDetails.length, 0);
   const estimatedMinutes = Math.round(totalSets * 1.5 + totalSets * (plan[0]?.restSeconds || 60) / 60);
 
   const goalNames = { lose: '체중 감량', gain: '근육 증가', maintain: '체력 향상' };

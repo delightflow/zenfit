@@ -10,6 +10,7 @@ import {
   exercises as allExercises,
   WorkoutPlan,
   WorkoutPlanItem,
+  SetDetail,
   Exercise,
   BODY_PART_LABELS,
   BODY_PART_EMOJI,
@@ -26,14 +27,13 @@ export default function WorkoutScreen() {
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [phase, setPhase] = useState<Phase>('preview');
   const [currentExIndex, setCurrentExIndex] = useState(0);
-  const [currentSet, setCurrentSet] = useState(1);
+  const [currentSet, setCurrentSet] = useState(0); // 0-indexed
   const [timer, setTimer] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [restTime, setRestTime] = useState(0);
   const [startTime] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [swapIndex, setSwapIndex] = useState<number | null>(null); // For exercise swap modal
-  const [editIndex, setEditIndex] = useState<number | null>(null); // For sets/reps/weight edit
+  const [swapIndex, setSwapIndex] = useState<number | null>(null);
 
   // Generate workout plan
   useEffect(() => {
@@ -73,32 +73,38 @@ export default function WorkoutScreen() {
 
   const currentPlanItem = plan.exercises[currentExIndex];
   const totalExercises = plan.exercises.length;
+  const totalSets = plan.exercises.reduce((sum, e) => sum + e.setDetails.length, 0);
 
   const handleStartWorkout = () => {
     setPhase('exercise');
     setCurrentExIndex(0);
-    setCurrentSet(1);
+    setCurrentSet(0);
     setTimer(0);
     setIsTimerRunning(true);
   };
 
   const handleSetComplete = () => {
     Vibration.vibrate(200);
-    if (currentSet < currentPlanItem.sets) {
+
+    // Mark current set as completed
+    const updated = { ...plan };
+    updated.exercises[currentExIndex].setDetails[currentSet].completed = true;
+    setPlan({ ...updated });
+
+    if (currentSet < currentPlanItem.setDetails.length - 1) {
       // More sets remaining - start rest
       setCurrentSet((prev) => prev + 1);
       setRestTime(currentPlanItem.restSeconds);
       setPhase('rest');
       setIsTimerRunning(true);
     } else if (currentExIndex < totalExercises - 1) {
-      // Next exercise - start rest
+      // Next exercise
       setCurrentExIndex((prev) => prev + 1);
-      setCurrentSet(1);
-      setRestTime(currentPlanItem.restSeconds + 15); // Extra rest between exercises
+      setCurrentSet(0);
+      setRestTime(currentPlanItem.restSeconds + 15);
       setPhase('rest');
       setIsTimerRunning(true);
     } else {
-      // Workout complete
       handleWorkoutComplete();
     }
   };
@@ -136,56 +142,26 @@ export default function WorkoutScreen() {
   // ===== Customize Handlers =====
   const handleRemoveExercise = (index: number) => {
     if (!plan || plan.exercises.length <= 2) return;
-    const updated = { ...plan, exercises: plan.exercises.filter((_, i) => i !== index) };
-    setPlan(updated);
+    setPlan({ ...plan, exercises: plan.exercises.filter((_, i) => i !== index) });
   };
 
   const handleSwapExercise = (newEx: Exercise) => {
     if (!plan || swapIndex === null) return;
-    const updated = {
+    const old = plan.exercises[swapIndex];
+    const defaultWeight = newEx.equipment === 'bodyweight' ? 0 : 20;
+    const newSetDetails: SetDetail[] = Array.from({ length: newEx.defaultSets }, () => ({
+      weight: defaultWeight,
+      reps: newEx.defaultReps,
+    }));
+    setPlan({
       ...plan,
       exercises: plan.exercises.map((item, i) =>
         i === swapIndex
-          ? { ...item, exercise: newEx, sets: newEx.defaultSets, reps: newEx.defaultReps, weight: 0, restSeconds: newEx.restSeconds }
+          ? { ...item, exercise: newEx, setDetails: newSetDetails, restSeconds: newEx.restSeconds }
           : item
       ),
-    };
-    setPlan(updated);
+    });
     setSwapIndex(null);
-  };
-
-  // ===== Edit Handlers (sets/reps/weight) =====
-  const handleUpdateSets = (index: number, delta: number) => {
-    if (!plan) return;
-    const updated = {
-      ...plan,
-      exercises: plan.exercises.map((item, i) =>
-        i === index ? { ...item, sets: Math.max(1, Math.min(10, item.sets + delta)) } : item
-      ),
-    };
-    setPlan(updated);
-  };
-
-  const handleUpdateReps = (index: number, value: string) => {
-    if (!plan) return;
-    const updated = {
-      ...plan,
-      exercises: plan.exercises.map((item, i) =>
-        i === index ? { ...item, reps: value } : item
-      ),
-    };
-    setPlan(updated);
-  };
-
-  const handleUpdateWeight = (index: number, delta: number) => {
-    if (!plan) return;
-    const updated = {
-      ...plan,
-      exercises: plan.exercises.map((item, i) =>
-        i === index ? { ...item, weight: Math.max(0, item.weight + delta) } : item
-      ),
-    };
-    setPlan(updated);
   };
 
   const getSwapCandidates = (): Exercise[] => {
@@ -197,7 +173,55 @@ export default function WorkoutScreen() {
     );
   };
 
-  // ===== Preview Phase =====
+  // Per-set weight/reps editing
+  const handleUpdateSetWeight = (exIndex: number, setIndex: number, delta: number) => {
+    if (!plan) return;
+    const updated = { ...plan };
+    const sd = { ...updated.exercises[exIndex].setDetails[setIndex] };
+    sd.weight = Math.max(0, sd.weight + delta);
+    updated.exercises[exIndex] = {
+      ...updated.exercises[exIndex],
+      setDetails: updated.exercises[exIndex].setDetails.map((s, i) => i === setIndex ? sd : s),
+    };
+    setPlan({ ...updated });
+  };
+
+  const handleUpdateSetReps = (exIndex: number, setIndex: number, value: string) => {
+    if (!plan) return;
+    const updated = { ...plan };
+    const sd = { ...updated.exercises[exIndex].setDetails[setIndex] };
+    sd.reps = value;
+    updated.exercises[exIndex] = {
+      ...updated.exercises[exIndex],
+      setDetails: updated.exercises[exIndex].setDetails.map((s, i) => i === setIndex ? sd : s),
+    };
+    setPlan({ ...updated });
+  };
+
+  const handleAddSet = (exIndex: number) => {
+    if (!plan) return;
+    const item = plan.exercises[exIndex];
+    const lastSet = item.setDetails[item.setDetails.length - 1];
+    const newSet: SetDetail = { weight: lastSet.weight, reps: lastSet.reps };
+    setPlan({
+      ...plan,
+      exercises: plan.exercises.map((e, i) =>
+        i === exIndex ? { ...e, setDetails: [...e.setDetails, newSet] } : e
+      ),
+    });
+  };
+
+  const handleRemoveSet = (exIndex: number) => {
+    if (!plan || plan.exercises[exIndex].setDetails.length <= 1) return;
+    setPlan({
+      ...plan,
+      exercises: plan.exercises.map((e, i) =>
+        i === exIndex ? { ...e, setDetails: e.setDetails.slice(0, -1) } : e
+      ),
+    });
+  };
+
+  // ===== Preview Phase (PlanFit style) =====
   if (phase === 'preview') {
     const swapCandidates = getSwapCandidates();
 
@@ -212,7 +236,6 @@ export default function WorkoutScreen() {
 
           <View style={styles.planHeader}>
             <Text style={styles.planTitle}>{plan.name}</Text>
-            <Text style={styles.customHint}>운동을 탭하여 교체하거나 X로 삭제하세요</Text>
             <View style={styles.planStats}>
               <Text style={styles.planStat}>🏋️ {totalExercises}개 운동</Text>
               <Text style={styles.planStat}>⏱️ ~{plan.estimatedMinutes}분</Text>
@@ -220,72 +243,96 @@ export default function WorkoutScreen() {
             </View>
           </View>
 
-          {plan.exercises.map((item, i) => (
-            <View key={item.exercise.id + i} style={styles.previewCard}>
-              <TouchableOpacity style={styles.previewNumber} onPress={() => setSwapIndex(i)}>
-                <Text style={styles.previewNumberText}>{i + 1}</Text>
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <TouchableOpacity onPress={() => setSwapIndex(i)}>
-                  <Text style={styles.previewName}>{item.exercise.name}</Text>
-                  <Text style={styles.previewDetail}>
-                    {BODY_PART_EMOJI[item.exercise.bodyPart]} {BODY_PART_LABELS[item.exercise.bodyPart]}
-                    {'  '}|{'  '}{item.exercise.equipment === 'bodyweight' ? '맨몸' : item.exercise.equipment}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Editable sets/reps/weight row */}
-                <View style={styles.editRow}>
-                  {/* Sets */}
-                  <View style={styles.editGroup}>
-                    <Text style={styles.editLabel}>세트</Text>
-                    <View style={styles.editControls}>
-                      <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateSets(i, -1)}>
-                        <Text style={styles.editBtnText}>-</Text>
-                      </TouchableOpacity>
-                      <Text style={styles.editValue}>{item.sets}</Text>
-                      <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateSets(i, 1)}>
-                        <Text style={styles.editBtnText}>+</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {/* Reps */}
-                  <View style={styles.editGroup}>
-                    <Text style={styles.editLabel}>횟수</Text>
-                    <TextInput
-                      style={styles.editInput}
-                      value={item.reps}
-                      onChangeText={(v) => handleUpdateReps(i, v)}
-                      keyboardType="default"
-                      selectTextOnFocus
-                    />
-                  </View>
-
-                  {/* Weight (only for non-bodyweight) */}
-                  {item.exercise.equipment !== 'bodyweight' && (
-                    <View style={styles.editGroup}>
-                      <Text style={styles.editLabel}>kg</Text>
-                      <View style={styles.editControls}>
-                        <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateWeight(i, -2.5)}>
-                          <Text style={styles.editBtnText}>-</Text>
-                        </TouchableOpacity>
-                        <Text style={styles.editValue}>{item.weight}</Text>
-                        <TouchableOpacity style={styles.editBtn} onPress={() => handleUpdateWeight(i, 2.5)}>
-                          <Text style={styles.editBtnText}>+</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+          {plan.exercises.map((item, exIdx) => {
+            const isWeighted = item.exercise.equipment !== 'bodyweight';
+            return (
+              <View key={item.exercise.id + exIdx} style={styles.exerciseCard}>
+                {/* Exercise Header */}
+                <View style={styles.exerciseCardHeader}>
+                  <TouchableOpacity style={styles.exerciseNumberBadge} onPress={() => setSwapIndex(exIdx)}>
+                    <Text style={styles.exerciseNumberText}>{exIdx + 1}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => setSwapIndex(exIdx)}>
+                    <Text style={styles.exerciseCardName}>{item.exercise.name}</Text>
+                    <Text style={styles.exerciseCardDetail}>
+                      {BODY_PART_EMOJI[item.exercise.bodyPart]} {BODY_PART_LABELS[item.exercise.bodyPart]}
+                      {'  '}|{'  '}{isWeighted ? item.exercise.equipment : '맨몸'}
+                      {'  '}|{'  '}운동 대체 →
+                    </Text>
+                  </TouchableOpacity>
+                  {plan.exercises.length > 2 && (
+                    <TouchableOpacity onPress={() => handleRemoveExercise(exIdx)} style={styles.removeBtn}>
+                      <Text style={styles.removeBtnText}>✕</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
+
+                {/* Per-set rows (PlanFit style) */}
+                {item.setDetails.map((sd, setIdx) => (
+                  <View
+                    key={setIdx}
+                    style={[styles.setRow, setIdx === 0 && styles.setRowFirst]}
+                  >
+                    <Text style={styles.setLabel}>{setIdx + 1}세트</Text>
+
+                    {isWeighted ? (
+                      <>
+                        {/* Weight */}
+                        <View style={styles.setValueGroup}>
+                          <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(exIdx, setIdx, -2.5)}>
+                            <Text style={styles.miniBtnText}>-</Text>
+                          </TouchableOpacity>
+                          <View style={styles.setValueBox}>
+                            <Text style={styles.setValueNum}>{sd.weight}</Text>
+                            <Text style={styles.setValueUnit}>kg</Text>
+                          </View>
+                          <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(exIdx, setIdx, 2.5)}>
+                            <Text style={styles.miniBtnText}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.setDivider}>/</Text>
+
+                        {/* Reps */}
+                        <View style={styles.setValueGroup}>
+                          <TextInput
+                            style={styles.repsInput}
+                            value={sd.reps}
+                            onChangeText={(v) => handleUpdateSetReps(exIdx, setIdx, v)}
+                            keyboardType="default"
+                            selectTextOnFocus
+                          />
+                          <Text style={styles.setValueUnit}>회</Text>
+                        </View>
+                      </>
+                    ) : (
+                      /* Bodyweight - just reps/time */
+                      <View style={styles.setValueGroup}>
+                        <TextInput
+                          style={styles.repsInputWide}
+                          value={sd.reps}
+                          onChangeText={(v) => handleUpdateSetReps(exIdx, setIdx, v)}
+                          keyboardType="default"
+                          selectTextOnFocus
+                        />
+                        <Text style={styles.setValueUnit}>{sd.reps.includes('초') ? '' : '회'}</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+
+                {/* Add/Remove Set buttons */}
+                <View style={styles.setActionRow}>
+                  <TouchableOpacity style={styles.setActionBtn} onPress={() => handleRemoveSet(exIdx)}>
+                    <Text style={styles.setActionText}>- 세트 삭제</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.setActionBtn} onPress={() => handleAddSet(exIdx)}>
+                    <Text style={styles.setActionText}>+ 세트 추가</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              {plan.exercises.length > 2 && (
-                <TouchableOpacity onPress={() => handleRemoveExercise(i)} style={styles.removeBtn}>
-                  <Text style={styles.removeBtnText}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
+            );
+          })}
 
           <TouchableOpacity style={styles.startBtn} onPress={handleStartWorkout}>
             <Text style={styles.startBtnText}>운동 시작 🚀</Text>
@@ -324,9 +371,6 @@ export default function WorkoutScreen() {
                           {item.equipment === 'bodyweight' ? '맨몸' : item.equipment} | {item.defaultSets}세트 x {item.defaultReps}
                         </Text>
                       </View>
-                      <Text style={styles.swapDiff}>
-                        {item.difficulty === 'beginner' ? '🌱' : item.difficulty === 'intermediate' ? '🌿' : '🌳'}
-                      </Text>
                     </TouchableOpacity>
                   )}
                 />
@@ -338,80 +382,104 @@ export default function WorkoutScreen() {
     );
   }
 
-  // ===== Exercise Phase =====
+  // ===== Exercise Phase (PlanFit style) =====
   if (phase === 'exercise') {
     const ex = currentPlanItem.exercise;
+    const sd = currentPlanItem.setDetails[currentSet];
+    const isWeighted = ex.equipment !== 'bodyweight';
+
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.exerciseContainer}>
-          {/* Progress */}
-          <View style={styles.progressRow}>
-            <Text style={styles.progressText}>
-              {currentExIndex + 1}/{totalExercises}
-            </Text>
+        <View style={styles.exercisePhase}>
+          {/* Top bar */}
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={() => setPhase('preview')}>
+              <Text style={styles.backButton}>←</Text>
+            </TouchableOpacity>
             <Text style={styles.timerText}>{formatTime(timer)}</Text>
           </View>
+
+          {/* Progress */}
           <View style={styles.progressBarBg}>
             <View
               style={[
                 styles.progressBarFill,
-                { width: `${((currentExIndex * currentPlanItem.sets + currentSet - 1) / (totalExercises * currentPlanItem.sets)) * 100}%` },
+                { width: `${((currentExIndex * currentPlanItem.setDetails.length + currentSet) / totalSets) * 100}%` },
               ]}
             />
           </View>
 
+          {/* Exercise tip card */}
+          <View style={styles.tipCard}>
+            <Text style={styles.tipCardText}>
+              {ex.tips[0] || ex.guide[0]}
+            </Text>
+          </View>
+
           {/* Exercise Info */}
-          <View style={styles.exerciseInfo}>
-            <Text style={styles.exerciseEmoji}>
-              {BODY_PART_EMOJI[ex.bodyPart]}
-            </Text>
-            <Text style={styles.exerciseName}>{ex.name}</Text>
-            <Text style={styles.exercisePart}>
-              {BODY_PART_LABELS[ex.bodyPart]}
-              {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
-            </Text>
-          </View>
+          <Text style={styles.exPhaseTitle}>{ex.name}</Text>
+          <Text style={styles.exPhaseSubtitle}>
+            {BODY_PART_EMOJI[ex.bodyPart]} {BODY_PART_LABELS[ex.bodyPart]}
+            {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
+          </Text>
 
-          {/* Set Info */}
-          <View style={styles.setInfo}>
-            <Text style={styles.setLabel}>세트</Text>
-            <Text style={styles.setCount}>
-              {currentSet} / {currentPlanItem.sets}
-            </Text>
-            <Text style={styles.repsText}>{currentPlanItem.reps} 회</Text>
-            {currentPlanItem.weight > 0 && (
-              <Text style={styles.weightText}>{currentPlanItem.weight} kg</Text>
-            )}
-          </View>
+          {/* Set Details (PlanFit style) */}
+          <ScrollView style={styles.setListScroll} showsVerticalScrollIndicator={false}>
+            {currentPlanItem.setDetails.map((s, idx) => {
+              const isCurrent = idx === currentSet;
+              const isDone = s.completed;
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.exSetRow,
+                    isCurrent && styles.exSetRowCurrent,
+                    isDone && styles.exSetRowDone,
+                  ]}
+                >
+                  <Text style={[styles.exSetLabel, isCurrent && styles.exSetLabelCurrent]}>
+                    {isDone ? '✓' : `${idx + 1}세트`}
+                  </Text>
 
-          {/* Guide */}
-          <ScrollView style={styles.guideScroll} showsVerticalScrollIndicator={false}>
-            {ex.guide.map((step, i) => (
-              <View key={i} style={styles.guideStep}>
-                <Text style={styles.guideStepNum}>{i + 1}</Text>
-                <Text style={styles.guideStepText}>{step}</Text>
-              </View>
-            ))}
-            {ex.tips.length > 0 && (
-              <View style={styles.tipBox}>
-                <Text style={styles.tipTitle}>💡 팁</Text>
-                {ex.tips.map((tip, i) => (
-                  <Text key={i} style={styles.tipText}>• {tip}</Text>
-                ))}
-              </View>
-            )}
+                  {isWeighted && (
+                    <>
+                      <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
+                        {s.weight}
+                      </Text>
+                      <Text style={styles.exSetUnit}>kg</Text>
+                      <Text style={styles.exSetDivider}>/</Text>
+                    </>
+                  )}
+
+                  <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
+                    {s.reps}
+                  </Text>
+                  <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '' : '회'}</Text>
+                </View>
+              );
+            })}
           </ScrollView>
 
-          {/* Complete Set Button */}
-          <TouchableOpacity style={styles.completeSetBtn} onPress={handleSetComplete}>
-            <Text style={styles.completeSetBtnText}>
-              {currentSet < currentPlanItem.sets
-                ? `세트 완료 ✓`
-                : currentExIndex < totalExercises - 1
-                  ? '다음 운동으로 →'
-                  : '운동 완료! 🎉'}
-            </Text>
-          </TouchableOpacity>
+          {/* Bottom buttons */}
+          <View style={styles.bottomBtns}>
+            <TouchableOpacity style={styles.restTimerBtn} onPress={() => {
+              setRestTime(currentPlanItem.restSeconds);
+              setPhase('rest');
+              setIsTimerRunning(true);
+            }}>
+              <Text style={styles.restTimerBtnText}>휴식 타이머</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.setCompleteBtn} onPress={handleSetComplete}>
+              <Text style={styles.setCompleteBtnText}>
+                {currentSet < currentPlanItem.setDetails.length - 1
+                  ? '세트 완료'
+                  : currentExIndex < totalExercises - 1
+                    ? '다음 운동 →'
+                    : '운동 완료! 🎉'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -430,7 +498,6 @@ export default function WorkoutScreen() {
           <Text style={styles.restTimer}>{formatTime(restTime)}</Text>
           <Text style={styles.restHint}>다음: {nextEx?.exercise.name}</Text>
 
-          {/* Motivation during rest */}
           <View style={styles.restMotivation}>
             <Text style={styles.restMotivationText}>
               {restTime > 30 ? '호흡을 가다듬으세요 😮‍💨' : '거의 다 쉬었어요! 준비하세요 💪'}
@@ -496,18 +563,131 @@ const styles = StyleSheet.create({
   planStats: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
   planStat: { color: Colors.textSecondary, fontSize: FontSize.sm },
 
-  previewCard: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
-    backgroundColor: Colors.card, borderRadius: BorderRadius.md, padding: Spacing.md,
+  // Exercise Card (Preview)
+  exerciseCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.card,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
   },
-  previewNumber: {
+  exerciseCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  exerciseNumberBadge: {
     width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.surface,
     alignItems: 'center', justifyContent: 'center',
   },
-  previewNumberText: { color: Colors.primary, fontWeight: '700', fontSize: FontSize.sm },
-  previewName: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
-  previewDetail: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
+  exerciseNumberText: { color: Colors.primary, fontWeight: '700', fontSize: FontSize.sm },
+  exerciseCardName: { fontSize: FontSize.md, fontWeight: '700', color: Colors.text },
+  exerciseCardDetail: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
+
+  // Per-set row
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.surface,
+    gap: Spacing.sm,
+  },
+  setRowFirst: {
+    borderTopWidth: 0,
+  },
+  setLabel: {
+    width: 48,
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  setValueGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  setValueBox: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    minWidth: 50,
+    justifyContent: 'center',
+  },
+  setValueNum: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  setValueUnit: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    marginLeft: 2,
+  },
+  setDivider: {
+    fontSize: FontSize.lg,
+    color: Colors.textMuted,
+    marginHorizontal: 4,
+  },
+  miniBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  miniBtnText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
+  repsInput: {
+    backgroundColor: Colors.surface,
+    color: Colors.text,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    textAlign: 'center',
+    minWidth: 44,
+    height: 32,
+  },
+  repsInputWide: {
+    backgroundColor: Colors.surface,
+    color: Colors.text,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    textAlign: 'center',
+    minWidth: 60,
+    height: 32,
+  },
+
+  // Set action row
+  setActionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.surface,
+    paddingTop: Spacing.sm,
+  },
+  setActionBtn: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  setActionText: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: '600' },
+
+  removeBtn: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  removeBtnText: { color: Colors.accent, fontSize: FontSize.sm, fontWeight: '700' },
 
   startBtn: {
     marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
@@ -516,47 +696,60 @@ const styles = StyleSheet.create({
   },
   startBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
 
-  // Exercise Phase
-  exerciseContainer: { flex: 1, padding: Spacing.lg },
-  progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  progressText: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: '600' },
+  // ===== Exercise Phase =====
+  exercisePhase: { flex: 1, padding: Spacing.lg },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   timerText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
   progressBarBg: {
     height: 4, backgroundColor: Colors.surface, borderRadius: 2, marginTop: Spacing.sm,
   },
   progressBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 2 },
 
-  exerciseInfo: { alignItems: 'center', marginTop: Spacing.xl },
-  exerciseEmoji: { fontSize: 48, marginBottom: Spacing.sm },
-  exerciseName: { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.text },
-  exercisePart: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing.xs },
-
-  setInfo: { alignItems: 'center', marginTop: Spacing.lg },
-  setLabel: { fontSize: FontSize.sm, color: Colors.textMuted },
-  setCount: { fontSize: FontSize.hero, fontWeight: '800', color: Colors.primary },
-  repsText: { fontSize: FontSize.lg, color: Colors.text, fontWeight: '600' },
-  weightText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: '600', marginTop: 2 },
-
-  guideScroll: { flex: 1, marginTop: Spacing.lg },
-  guideStep: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
-  guideStepNum: {
-    width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.surface,
-    textAlign: 'center', lineHeight: 24, color: Colors.primary, fontWeight: '700', fontSize: FontSize.sm,
+  tipCard: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.lg,
+    marginTop: Spacing.lg, alignItems: 'center',
   },
-  guideStepText: { flex: 1, color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
+  tipCardText: { color: Colors.textSecondary, fontSize: FontSize.sm, textAlign: 'center', lineHeight: 22 },
 
-  tipBox: {
-    backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.md,
-    marginTop: Spacing.sm,
-  },
-  tipTitle: { color: Colors.primary, fontWeight: '700', fontSize: FontSize.sm, marginBottom: Spacing.xs },
-  tipText: { color: Colors.textSecondary, fontSize: FontSize.sm, lineHeight: 20 },
+  exPhaseTitle: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.text, textAlign: 'center', marginTop: Spacing.lg },
+  exPhaseSubtitle: { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs },
 
-  completeSetBtn: {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md,
+  setListScroll: { flex: 1, marginTop: Spacing.lg },
+
+  // Exercise set rows
+  exSetRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
+    padding: Spacing.md, marginBottom: Spacing.sm,
   },
-  completeSetBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
+  exSetRowCurrent: {
+    borderWidth: 1.5, borderColor: Colors.primary,
+  },
+  exSetRowDone: {
+    opacity: 0.5,
+  },
+  exSetLabel: { width: 48, fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '600' },
+  exSetLabelCurrent: { color: Colors.primary },
+  exSetValue: { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.text },
+  exSetValueCurrent: { color: Colors.primary },
+  exSetUnit: { fontSize: FontSize.sm, color: Colors.textMuted },
+  exSetDivider: { fontSize: FontSize.lg, color: Colors.textMuted, marginHorizontal: 4 },
+
+  // Bottom buttons
+  bottomBtns: {
+    flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md,
+  },
+  restTimerBtn: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg,
+    borderWidth: 1, borderColor: Colors.primary,
+  },
+  restTimerBtnText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '600' },
+  setCompleteBtn: {
+    flex: 1, backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md, alignItems: 'center',
+  },
+  setCompleteBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
 
   // Rest Phase
   restContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.lg },
@@ -598,76 +791,11 @@ const styles = StyleSheet.create({
   },
   homeBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.background },
 
-  // Edit controls
-  editRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.sm,
-    alignItems: 'center',
-  },
-  editGroup: {
-    alignItems: 'center',
-  },
-  editLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    marginBottom: 2,
-  },
-  editControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  editBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editBtnText: {
-    color: Colors.primary,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-  },
-  editValue: {
-    color: Colors.text,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    minWidth: 28,
-    textAlign: 'center',
-  },
-  editInput: {
-    backgroundColor: Colors.surface,
-    color: Colors.text,
-    borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    textAlign: 'center',
-    minWidth: 48,
-    height: 26,
-  },
-
-  // Customize
-  customHint: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.xs },
-  removeBtn: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.surface,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  removeBtnText: { color: Colors.accent, fontSize: FontSize.sm, fontWeight: '700' },
-
   // Swap Modal
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: Colors.card, borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg,
-    maxHeight: '70%',
+    borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, maxHeight: '70%',
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
   modalTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
@@ -682,5 +810,4 @@ const styles = StyleSheet.create({
   swapEmoji: { fontSize: 24 },
   swapName: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
   swapDetail: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
-  swapDiff: { fontSize: 18 },
 });
