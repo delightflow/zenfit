@@ -61,6 +61,8 @@ export default function WorkoutScreen() {
   const [startTime] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
 
   // Generate workout plan
   useEffect(() => {
@@ -146,9 +148,6 @@ export default function WorkoutScreen() {
   const currentPlanItem = plan.exercises[currentExIndex];
   const totalExercises = plan.exercises.length;
   const totalSets = plan.exercises.reduce((sum, e) => sum + e.setDetails.length, 0);
-
-  const [showGuide, setShowGuide] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
 
   const handleStartWorkout = () => {
     if (!plan || plan.exercises.length === 0) return;
