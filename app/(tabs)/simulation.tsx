@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, Image, Alert, Platform, Dimensions,
+  ActivityIndicator, Image, Alert, Platform, Dimensions, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -153,9 +153,14 @@ export default function SimulationScreen() {
     );
   }
 
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const pickImage = async (useCamera: boolean) => {
+    setUploadError(null);
     try {
-      if (useCamera) {
+      const isWeb = Platform.OS === 'web';
+
+      if (useCamera && !isWeb) {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) {
           Alert.alert('권한 필요', '카메라 접근 권한이 필요합니다.');
@@ -163,21 +168,16 @@ export default function SimulationScreen() {
         }
       }
 
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ['images'],
-            quality: 0.7,
-            base64: true,
-            allowsEditing: true,
-            aspect: [3, 4],
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            quality: 0.7,
-            base64: true,
-            allowsEditing: true,
-            aspect: [3, 4],
-          });
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        quality: 0.7,
+        base64: true,
+        ...(isWeb ? {} : { allowsEditing: true, aspect: [3, 4] as [number, number] }),
+      };
+
+      const result = (useCamera && !isWeb)
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
 
       if (result.canceled || !result.assets?.[0]) return;
 
@@ -194,15 +194,39 @@ export default function SimulationScreen() {
       };
       addBodyPhoto(newPhoto);
 
+      // Get base64 - on web, may need manual conversion
+      let base64Data = asset.base64;
+      if (!base64Data && asset.uri) {
+        try {
+          const response = await fetch(asset.uri);
+          const blob = await response.blob();
+          base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const dataUrl = reader.result as string;
+              resolve(dataUrl.split(',')[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch {
+          // base64 conversion failed - photo still saved, just no AI analysis
+        }
+      }
+
       // Auto-analyze with Gemini
-      if (asset.base64 && GEMINI_KEY) {
+      if (base64Data && GEMINI_KEY) {
         setAnalyzing(id);
-        const analysis = await analyzeBodyPhoto(asset.base64, profile);
+        const analysis = await analyzeBodyPhoto(base64Data, profile);
         updateBodyPhoto(id, { aiAnalysis: analysis });
         setAnalyzing(null);
+      } else if (!GEMINI_KEY) {
+        updateBodyPhoto(id, { aiAnalysis: '(API 키 미설정 - AI 분석 불가)' });
       }
     } catch (e) {
-      Alert.alert('오류', '사진을 불러올 수 없습니다.');
+      const msg = e instanceof Error ? e.message : '사진을 불러올 수 없습니다.';
+      setUploadError(msg);
+      if (Platform.OS !== 'web') Alert.alert('오류', msg);
     }
   };
 
@@ -261,15 +285,26 @@ export default function SimulationScreen() {
           <>
             {/* Upload Buttons */}
             <View style={styles.uploadRow}>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(true)}>
-                <Text style={styles.uploadIcon}>📷</Text>
-                <Text style={styles.uploadLabel}>촬영</Text>
-              </TouchableOpacity>
+              {Platform.OS !== 'web' && (
+                <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(true)}>
+                  <Text style={styles.uploadIcon}>📷</Text>
+                  <Text style={styles.uploadLabel}>촬영</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(false)}>
                 <Text style={styles.uploadIcon}>🖼️</Text>
-                <Text style={styles.uploadLabel}>앨범</Text>
+                <Text style={styles.uploadLabel}>{Platform.OS === 'web' ? '사진 선택' : '앨범'}</Text>
               </TouchableOpacity>
             </View>
+            {uploadError && (
+              <Text style={styles.errorText}>{uploadError}</Text>
+            )}
+            {analyzing && (
+              <View style={styles.globalAnalyzing}>
+                <ActivityIndicator color={Colors.primary} />
+                <Text style={styles.globalAnalyzingText}>AI가 체형을 분석하고 있습니다...</Text>
+              </View>
+            )}
 
             {/* Selected Photo Detail */}
             {selectedPhoto && (
@@ -501,6 +536,18 @@ const styles = StyleSheet.create({
   },
   uploadIcon: { fontSize: 32, marginBottom: Spacing.xs },
   uploadLabel: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: '600' },
+
+  // Error & status
+  errorText: {
+    color: Colors.accent, fontSize: FontSize.sm, textAlign: 'center',
+    marginBottom: Spacing.md, paddingHorizontal: Spacing.md,
+  },
+  globalAnalyzing: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: Spacing.sm, marginBottom: Spacing.md,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md, padding: Spacing.md,
+  },
+  globalAnalyzingText: { fontSize: FontSize.sm, color: Colors.primary },
 
   // Detail Card
   detailCard: {
