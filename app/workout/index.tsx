@@ -51,6 +51,7 @@ export default function WorkoutScreen() {
   const addWorkoutLog = useStore((s) => s.addWorkoutLog);
 
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>('preview');
   const [currentExIndex, setCurrentExIndex] = useState(0);
   const [currentSet, setCurrentSet] = useState(0); // 0-indexed
@@ -64,10 +65,23 @@ export default function WorkoutScreen() {
   // Generate workout plan
   useEffect(() => {
     if (!profile) return;
-    const dayOfWeek = new Date().getDay();
-    const parts = getRecommendedParts(dayOfWeek, profile.goal);
-    const workout = generateWorkoutPlan(profile.goal, profile.experience, parts);
-    setPlan(workout);
+    try {
+      const dayOfWeek = new Date().getDay();
+      const parts = getRecommendedParts(dayOfWeek, profile.goal || 'maintain');
+      const workout = generateWorkoutPlan(
+        profile.goal || 'maintain',
+        profile.experience || 'beginner',
+        parts
+      );
+      if (workout && workout.exercises.length > 0) {
+        setPlan(workout);
+        setPlanError(null);
+      } else {
+        setPlanError('운동 플랜을 생성할 수 없습니다. 프로필을 확인해주세요.');
+      }
+    } catch (e: any) {
+      setPlanError(`플랜 생성 오류: ${e?.message || '알 수 없는 오류'}`);
+    }
   }, [profile]);
 
   // Timer logic
@@ -99,11 +113,31 @@ export default function WorkoutScreen() {
   if (!plan || !profile) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={{ color: Colors.textSecondary, marginTop: Spacing.md, fontSize: FontSize.md }}>
-            운동 플랜 생성 중...
-          </Text>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.lg }}>
+          <TouchableOpacity onPress={() => router.back()} style={{ position: 'absolute', top: Spacing.lg, left: Spacing.lg }}>
+            <Text style={styles.backButton}>← 뒤로</Text>
+          </TouchableOpacity>
+          {planError ? (
+            <>
+              <Text style={{ fontSize: 48 }}>⚠️</Text>
+              <Text style={{ color: Colors.accent, marginTop: Spacing.md, fontSize: FontSize.md, textAlign: 'center' }}>
+                {planError}
+              </Text>
+              <TouchableOpacity
+                style={{ marginTop: Spacing.lg, backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingVertical: Spacing.md, paddingHorizontal: Spacing.xl }}
+                onPress={() => router.back()}
+              >
+                <Text style={{ color: Colors.background, fontWeight: '700', fontSize: FontSize.md }}>홈으로 돌아가기</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={{ color: Colors.textSecondary, marginTop: Spacing.md, fontSize: FontSize.md }}>
+                운동 플랜 생성 중...
+              </Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -114,7 +148,7 @@ export default function WorkoutScreen() {
   const totalSets = plan.exercises.reduce((sum, e) => sum + e.setDetails.length, 0);
 
   const [showGuide, setShowGuide] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
 
   const handleStartWorkout = () => {
     if (!plan || plan.exercises.length === 0) return;
