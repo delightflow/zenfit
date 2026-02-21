@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
@@ -18,6 +18,50 @@ import {
 } from '../../data/exercises';
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
+
+// ErrorBoundary to catch ANY rendering error and show it instead of blank screen
+class WorkoutErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('WorkoutScreen Error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <Text style={{ fontSize: 48 }}>💥</Text>
+            <Text style={{ color: '#FF6B6B', fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+              운동 화면 오류 발생
+            </Text>
+            <Text style={{ color: '#999', fontSize: 14, marginTop: 12, textAlign: 'center', lineHeight: 20 }}>
+              {this.state.error?.message || '알 수 없는 오류'}
+            </Text>
+            <Text style={{ color: '#666', fontSize: 11, marginTop: 8, textAlign: 'center', lineHeight: 16 }}>
+              {this.state.error?.stack?.split('\n').slice(0, 3).join('\n')}
+            </Text>
+            <TouchableOpacity
+              style={{ marginTop: 24, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}
+              onPress={() => router.back()}
+            >
+              <Text style={{ color: Colors.background, fontWeight: '700', fontSize: 16 }}>홈으로 돌아가기</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Safe Speech module loading
 let Speech: typeof import('expo-speech') | null = null;
@@ -45,7 +89,15 @@ const vibrate = (pattern?: number | number[]) => {
   }
 };
 
-export default function WorkoutScreen() {
+export default function WorkoutScreenWrapper() {
+  return (
+    <WorkoutErrorBoundary>
+      <WorkoutScreenInner />
+    </WorkoutErrorBoundary>
+  );
+}
+
+function WorkoutScreenInner() {
   const profile = useStore((s) => s.profile);
   const completeToday = useStore((s) => s.completeToday);
   const addWorkoutLog = useStore((s) => s.addWorkoutLog);
@@ -66,23 +118,27 @@ export default function WorkoutScreen() {
 
   // Generate workout plan
   useEffect(() => {
-    if (!profile) return;
+    if (!profile) {
+      setPlanError(`프로필이 없습니다. 온보딩을 다시 진행해주세요.`);
+      return;
+    }
     try {
       const dayOfWeek = new Date().getDay();
-      const parts = getRecommendedParts(dayOfWeek, profile.goal || 'maintain');
-      const workout = generateWorkoutPlan(
-        profile.goal || 'maintain',
-        profile.experience || 'beginner',
-        parts
-      );
-      if (workout && workout.exercises.length > 0) {
+      const goal = profile.goal || 'maintain';
+      const experience = profile.experience || 'beginner';
+      const parts = getRecommendedParts(dayOfWeek, goal);
+      console.log('[ZenFit] Plan generation:', { dayOfWeek, goal, experience, parts, profileKeys: Object.keys(profile) });
+      const workout = generateWorkoutPlan(goal, experience, parts);
+      console.log('[ZenFit] Plan result:', { exerciseCount: workout?.exercises?.length, name: workout?.name });
+      if (workout && workout.exercises && workout.exercises.length > 0) {
         setPlan(workout);
         setPlanError(null);
       } else {
-        setPlanError('운동 플랜을 생성할 수 없습니다. 프로필을 확인해주세요.');
+        setPlanError(`운동 플랜이 비어있습니다. (goal=${goal}, exp=${experience}, parts=${parts.join(',')})`);
       }
     } catch (e: any) {
-      setPlanError(`플랜 생성 오류: ${e?.message || '알 수 없는 오류'}`);
+      console.error('[ZenFit] Plan error:', e);
+      setPlanError(`플랜 생성 오류: ${e?.message || '알 수 없는 오류'}\n${e?.stack?.split('\n').slice(0, 2).join('\n') || ''}`);
     }
   }, [profile]);
 
@@ -137,6 +193,9 @@ export default function WorkoutScreen() {
               <ActivityIndicator size="large" color={Colors.primary} />
               <Text style={{ color: Colors.textSecondary, marginTop: Spacing.md, fontSize: FontSize.md }}>
                 운동 플랜 생성 중...
+              </Text>
+              <Text style={{ color: Colors.textMuted, marginTop: Spacing.sm, fontSize: FontSize.xs }}>
+                프로필: {profile ? '있음' : '없음'} | 플랜: {plan ? '있음' : '없음'}
               </Text>
             </>
           )}
