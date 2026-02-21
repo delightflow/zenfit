@@ -33,6 +33,7 @@ yarn-error.*
 # local env files
 .env
 .env*.local
+credentials.json
 
 # GitHub Pages build output (contains inlined API keys)
 docs/
