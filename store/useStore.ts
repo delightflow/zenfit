@@ -21,6 +21,15 @@ export interface WorkoutLog {
   calories: number;
 }
 
+export interface BodyPhoto {
+  id: string;
+  date: string; // YYYY-MM-DD
+  uri: string;
+  weight?: number;
+  note?: string;
+  aiAnalysis?: string;
+}
+
 interface AppState {
   // Onboarding
   onboarded: boolean;
@@ -39,6 +48,12 @@ interface AppState {
   // Workout logs
   workoutLogs: WorkoutLog[];
   addWorkoutLog: (log: WorkoutLog) => void;
+
+  // Body photos
+  bodyPhotos: BodyPhoto[];
+  addBodyPhoto: (photo: BodyPhoto) => void;
+  updateBodyPhoto: (id: string, updates: Partial<BodyPhoto>) => void;
+  removeBodyPhoto: (id: string) => void;
 
   // Actions
   completeToday: () => void;
@@ -80,10 +95,32 @@ export const useStore = create<AppState>((set, get) => ({
   lastWorkoutDate: null,
   todayCompleted: false,
   workoutLogs: [],
+  bodyPhotos: [],
 
   addWorkoutLog: (log) => {
     set((state) => ({
       workoutLogs: [...state.workoutLogs, log],
+    }));
+    get().saveToStorage();
+  },
+
+  addBodyPhoto: (photo) => {
+    set((state) => ({
+      bodyPhotos: [...state.bodyPhotos, photo],
+    }));
+    get().saveToStorage();
+  },
+
+  updateBodyPhoto: (id, updates) => {
+    set((state) => ({
+      bodyPhotos: state.bodyPhotos.map((p) => p.id === id ? { ...p, ...updates } : p),
+    }));
+    get().saveToStorage();
+  },
+
+  removeBodyPhoto: (id) => {
+    set((state) => ({
+      bodyPhotos: state.bodyPhotos.filter((p) => p.id !== id),
     }));
     get().saveToStorage();
   },
@@ -133,6 +170,7 @@ export const useStore = create<AppState>((set, get) => ({
           bestStreak: parsed.bestStreak ?? 0,
           lastWorkoutDate: parsed.lastWorkoutDate ?? null,
           workoutLogs: parsed.workoutLogs ?? [],
+          bodyPhotos: parsed.bodyPhotos ?? [],
         });
         get().checkStreak();
       }
@@ -151,6 +189,7 @@ export const useStore = create<AppState>((set, get) => ({
         bestStreak: state.bestStreak,
         lastWorkoutDate: state.lastWorkoutDate,
         workoutLogs: state.workoutLogs,
+        bodyPhotos: state.bodyPhotos,
       });
       await AsyncStorage.setItem(STORAGE_KEY, data);
     } catch (e) {
