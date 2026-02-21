@@ -2,24 +2,48 @@ import { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNo
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
-import { useStore } from '../../store/useStore';
-import {
-  generateWorkoutPlan,
-  getRecommendedParts,
-  exercises as allExercises,
-  WorkoutPlan,
-  WorkoutPlanItem,
-  SetDetail,
-  Exercise,
-  BODY_PART_LABELS,
-  BODY_PART_EMOJI,
-  BodyPart,
-} from '../../data/exercises';
+
+// === Dynamic imports: catch module-level failures ===
+const MODULE_ERRORS: string[] = [];
+
+let Colors: any, Spacing: any, FontSize: any, BorderRadius: any;
+try {
+  const theme = require('../../constants/theme');
+  Colors = theme.Colors;
+  Spacing = theme.Spacing;
+  FontSize = theme.FontSize;
+  BorderRadius = theme.BorderRadius;
+} catch (e: any) {
+  MODULE_ERRORS.push(`theme: ${e?.message}`);
+  Colors = { background: '#0D0D0D', card: '#1A1A1A', cardBorder: '#2A2A2A', surface: '#242424', primary: '#4EEEB0', primaryDark: '#3BC494', accent: '#FF6B6B', warning: '#FFB84D', text: '#FFFFFF', textSecondary: '#9CA3AF', textMuted: '#6B7280', streak: '#FF9500', streakBg: '#2D1F00', success: '#4EEEB0', danger: '#FF4757' };
+  Spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 };
+  FontSize = { xs: 12, sm: 14, md: 16, lg: 18, xl: 24, xxl: 32, hero: 48 };
+  BorderRadius = { sm: 8, md: 12, lg: 16, xl: 24, full: 9999 };
+}
+
+let useStore: any;
+try {
+  useStore = require('../../store/useStore').useStore;
+} catch (e: any) {
+  MODULE_ERRORS.push(`store: ${e?.message}`);
+}
+
+let generateWorkoutPlan: any, getRecommendedParts: any, allExercises: any;
+let BODY_PART_LABELS: any, BODY_PART_EMOJI: any;
+try {
+  const data = require('../../data/exercises');
+  generateWorkoutPlan = data.generateWorkoutPlan;
+  getRecommendedParts = data.getRecommendedParts;
+  allExercises = data.exercises;
+  BODY_PART_LABELS = data.BODY_PART_LABELS;
+  BODY_PART_EMOJI = data.BODY_PART_EMOJI;
+} catch (e: any) {
+  MODULE_ERRORS.push(`exercises: ${e?.message}`);
+}
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
 
-// ErrorBoundary to catch ANY rendering error and show it instead of blank screen
+// ErrorBoundary using PLAIN View (no SafeAreaView) to avoid cascading failures
 class WorkoutErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean; error: Error | null }
@@ -37,26 +61,24 @@ class WorkoutErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-            <Text style={{ fontSize: 48 }}>💥</Text>
-            <Text style={{ color: '#FF6B6B', fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
-              운동 화면 오류 발생
-            </Text>
-            <Text style={{ color: '#999', fontSize: 14, marginTop: 12, textAlign: 'center', lineHeight: 20 }}>
-              {this.state.error?.message || '알 수 없는 오류'}
-            </Text>
-            <Text style={{ color: '#666', fontSize: 11, marginTop: 8, textAlign: 'center', lineHeight: 16 }}>
-              {this.state.error?.stack?.split('\n').slice(0, 3).join('\n')}
-            </Text>
-            <TouchableOpacity
-              style={{ marginTop: 24, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}
-              onPress={() => router.back()}
-            >
-              <Text style={{ color: Colors.background, fontWeight: '700', fontSize: 16 }}>홈으로 돌아가기</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+        <View style={{ flex: 1, backgroundColor: '#0D0D0D', justifyContent: 'center', alignItems: 'center', padding: 40, paddingTop: 80 }}>
+          <Text style={{ fontSize: 48 }}>💥</Text>
+          <Text style={{ color: '#FF6B6B', fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+            운동 화면 오류 발생
+          </Text>
+          <Text style={{ color: '#999', fontSize: 14, marginTop: 12, textAlign: 'center', lineHeight: 20 }}>
+            {this.state.error?.message || '알 수 없는 오류'}
+          </Text>
+          <Text style={{ color: '#666', fontSize: 11, marginTop: 8, textAlign: 'center', lineHeight: 16 }}>
+            {this.state.error?.stack?.split('\n').slice(0, 3).join('\n')}
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 24, backgroundColor: '#4EEEB0', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}
+            onPress={() => router.back()}
+          >
+            <Text style={{ color: '#0D0D0D', fontWeight: '700', fontSize: 16 }}>홈으로 돌아가기</Text>
+          </TouchableOpacity>
+        </View>
       );
     }
     return this.props.children;
@@ -64,7 +86,7 @@ class WorkoutErrorBoundary extends Component<
 }
 
 // Safe Speech module loading
-let Speech: typeof import('expo-speech') | null = null;
+let Speech: any = null;
 try {
   Speech = require('expo-speech');
 } catch (e) {
@@ -89,7 +111,28 @@ const vibrate = (pattern?: number | number[]) => {
   }
 };
 
+// If module imports failed, show error immediately
 export default function WorkoutScreenWrapper() {
+  if (MODULE_ERRORS.length > 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0D0D0D', justifyContent: 'center', alignItems: 'center', padding: 40, paddingTop: 80 }}>
+        <Text style={{ fontSize: 48 }}>⚠️</Text>
+        <Text style={{ color: '#FF6B6B', fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+          모듈 로드 실패
+        </Text>
+        <Text style={{ color: '#999', fontSize: 14, marginTop: 12, textAlign: 'center', lineHeight: 20 }}>
+          {MODULE_ERRORS.join('\n')}
+        </Text>
+        <TouchableOpacity
+          style={{ marginTop: 24, backgroundColor: '#4EEEB0', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: '#0D0D0D', fontWeight: '700', fontSize: 16 }}>돌아가기</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <WorkoutErrorBoundary>
       <WorkoutScreenInner />
@@ -98,9 +141,9 @@ export default function WorkoutScreenWrapper() {
 }
 
 function WorkoutScreenInner() {
-  const profile = useStore((s) => s.profile);
-  const completeToday = useStore((s) => s.completeToday);
-  const addWorkoutLog = useStore((s) => s.addWorkoutLog);
+  const profile = useStore((s: any) => s.profile);
+  const completeToday = useStore((s: any) => s.completeToday);
+  const addWorkoutLog = useStore((s: any) => s.addWorkoutLog);
 
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
