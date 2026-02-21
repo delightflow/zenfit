@@ -8,13 +8,6 @@ import MotivationSimulation from '../../components/MotivationSimulation';
 
 const { width } = Dimensions.get('window');
 
-const MOTIVATION_MESSAGES = [
-  { skip: '오늘 빠지면 스트릭이 초기화됩니다!', do: '지금 시작하면 내일의 나에게 감사할 거예요' },
-  { skip: '근육은 쉬는 동안 사라지지만, 습관은 더 빨리 사라집니다', do: '30분만 투자하세요. 그게 전부입니다' },
-  { skip: '어제의 노력이 물거품이 될 수 있어요', do: '완벽하지 않아도 됩니다. 시작만 하세요' },
-  { skip: '포기는 한 번의 스킵에서 시작됩니다', do: '오늘의 운동이 한 달 후의 몸을 만듭니다' },
-  { skip: '스트릭을 유지하는 사람이 목표를 달성합니다', do: '매일 조금씩, 그게 비결입니다' },
-];
 
 function StreakCard() {
   const streak = useStore((s) => s.streak);
@@ -80,29 +73,6 @@ function WeekView() {
   );
 }
 
-function MotivationCard() {
-  const todayCompleted = useStore((s) => s.todayCompleted);
-  const streak = useStore((s) => s.streak);
-  const msg = MOTIVATION_MESSAGES[streak % MOTIVATION_MESSAGES.length];
-
-  if (todayCompleted) {
-    return (
-      <View style={[styles.motivationCard, { borderColor: Colors.success }]}>
-        <Text style={styles.motivationEmoji}>🎉</Text>
-        <Text style={styles.motivationTitle}>오늘 운동 완료!</Text>
-        <Text style={styles.motivationText}>잘했어요! 내일도 이 기세를 유지하세요.</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.motivationCard, { borderColor: Colors.warning }]}>
-      <Text style={styles.motivationEmoji}>⚡</Text>
-      <Text style={styles.motivationTitle}>{msg.do}</Text>
-      <Text style={[styles.motivationText, { color: Colors.accent }]}>⚠️ {msg.skip}</Text>
-    </View>
-  );
-}
 
 function TodayWorkout() {
   const todayCompleted = useStore((s) => s.todayCompleted);
@@ -169,11 +139,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <StreakCard />
-        <WeekView />
-        <MotivationCard />
-
-        {/* Habit Simulation */}
+        {/* Habit Simulation - 첫 화면 핵심: 오늘 운동 갔을때/안갔을때 예측 */}
         {profile && (
           <MotivationSimulation
             streak={useStore.getState().streak}
@@ -183,6 +149,9 @@ export default function HomeScreen() {
             targetWeight={profile.targetWeight}
           />
         )}
+
+        <StreakCard />
+        <WeekView />
 
         <TodayWorkout />
 
@@ -307,31 +276,6 @@ const styles = StyleSheet.create({
   },
   weekDotMissed: {
     backgroundColor: Colors.surface,
-  },
-
-  // Motivation
-  motivationCard: {
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    backgroundColor: Colors.card,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-  },
-  motivationEmoji: {
-    fontSize: 28,
-    marginBottom: Spacing.sm,
-  },
-  motivationTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: Spacing.xs,
-  },
-  motivationText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    lineHeight: 20,
   },
 
   // Today's Workout

@@ -243,7 +243,6 @@ function TimelineLine({ positive }: { positive?: boolean }) {
 const styles = StyleSheet.create({
   container: {
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
   },
   sectionTitle: {
     fontSize: FontSize.lg,
