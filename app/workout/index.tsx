@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import * as Speech from 'expo-speech';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
 import { useStore } from '../../store/useStore';
 import {
@@ -20,12 +19,29 @@ import {
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
 
+// Safe Speech module loading
+let Speech: typeof import('expo-speech') | null = null;
+try {
+  Speech = require('expo-speech');
+} catch (e) {
+  // expo-speech not available
+}
+
 // Voice coaching helper
 const speak = (text: string) => {
   try {
-    Speech.speak(text, { language: 'ko-KR', rate: 0.9, pitch: 1.0 });
+    Speech?.speak(text, { language: 'ko-KR', rate: 0.9, pitch: 1.0 });
   } catch (e) {
     // Silently fail if TTS unavailable
+  }
+};
+
+// Safe vibration helper
+const vibrate = (pattern?: number | number[]) => {
+  try {
+    Vibration.vibrate(pattern);
+  } catch (e) {
+    // Silently fail
   }
 };
 
@@ -62,12 +78,9 @@ export default function WorkoutScreen() {
           if (prev <= 1) {
             clearInterval(timerRef.current!);
             setIsTimerRunning(false);
-            Vibration.vibrate(500);
+            vibrate(500);
             setPhase('exercise');
-            // Voice coaching when rest ends
-            try {
-              Speech.speak('가보자!', { language: 'ko-KR', rate: 1.0 });
-            } catch (e) {}
+            speak('가보자!');
             return 0;
           }
           return prev - 1;
@@ -83,7 +96,18 @@ export default function WorkoutScreen() {
     };
   }, [isTimerRunning, phase]);
 
-  if (!plan || !profile) return null;
+  if (!plan || !profile) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={{ color: Colors.textSecondary, marginTop: Spacing.md, fontSize: FontSize.md }}>
+            운동 플랜 생성 중...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const currentPlanItem = plan.exercises[currentExIndex];
   const totalExercises = plan.exercises.length;
@@ -93,19 +117,24 @@ export default function WorkoutScreen() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
   const handleStartWorkout = () => {
+    if (!plan || plan.exercises.length === 0) return;
     setPhase('exercise');
     setCurrentExIndex(0);
     setCurrentSet(0);
     setTimer(0);
     setIsTimerRunning(true);
     if (voiceEnabled) {
-      const ex = plan!.exercises[0].exercise;
-      speak(`운동을 시작합니다. 첫 번째, ${ex.name}. ${ex.voiceCoaching[0] || '화이팅!'}`);
+      try {
+        const ex = plan.exercises[0].exercise;
+        speak(`운동을 시작합니다. 첫 번째, ${ex.name}. ${ex.voiceCoaching?.[0] || '화이팅!'}`);
+      } catch (e) {
+        // Silently fail
+      }
     }
   };
 
   const handleSetComplete = () => {
-    Vibration.vibrate(200);
+    vibrate(200);
 
     // Mark current set as completed
     const updated = { ...plan };
@@ -170,7 +199,7 @@ export default function WorkoutScreen() {
     if (voiceEnabled) {
       speak('운동 완료! 오늘도 해냈습니다. 정말 대단해요!');
     }
-    Vibration.vibrate([0, 200, 100, 200, 100, 400]);
+    vibrate([0, 200, 100, 200, 100, 400]);
   };
 
   const formatTime = (seconds: number) => {

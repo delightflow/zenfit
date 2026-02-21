@@ -1,5 +1,6 @@
 import { Tabs, Redirect } from 'expo-router';
-import { Text, View } from 'react-native';
+import { Text, View, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/theme';
 import { useStore } from '../../store/useStore';
 
@@ -19,10 +20,15 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 
 export default function TabLayout() {
   const onboarded = useStore((s) => s.onboarded);
+  const insets = useSafeAreaInsets();
 
   if (!onboarded) {
     return <Redirect href="/onboarding" />;
   }
+
+  // Android navigation bar needs extra bottom padding
+  const bottomPadding = Platform.OS === 'android' ? Math.max(insets.bottom, 10) : 10;
+  const tabBarHeight = 60 + bottomPadding;
 
   return (
     <Tabs
@@ -32,8 +38,8 @@ export default function TabLayout() {
           backgroundColor: Colors.card,
           borderTopColor: Colors.cardBorder,
           borderTopWidth: 1,
-          height: 70,
-          paddingBottom: 10,
+          height: tabBarHeight,
+          paddingBottom: bottomPadding,
           paddingTop: 8,
         },
         tabBarActiveTintColor: Colors.primary,
