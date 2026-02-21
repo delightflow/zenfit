@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# GitHub Pages build output (contains inlined API keys)
+docs/
+
 # typescript
 *.tsbuildinfo
 
