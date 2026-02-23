@@ -189,7 +189,7 @@ const setupBackgroundAudio = async () => {
       await Audio.setAudioModeAsync({
         staysActiveInBackground: true,
         playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
+        shouldDuckAndroid: false,
       });
     }
   } catch (e) {
@@ -397,7 +397,7 @@ function WorkoutScreenInner() {
           if (silentSoundRef.current) return; // already running
           const { sound } = await Audio.Sound.createAsync(
             require('../../assets/silent.wav'),
-            { isLooping: true, volume: 0 }
+            { isLooping: true, volume: 0.001 }
           );
           silentSoundRef.current = sound;
           await sound.playAsync();
