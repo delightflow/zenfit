@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
@@ -20,6 +20,11 @@ try {
   FontSize = { xs: 12, sm: 14, md: 16, lg: 18, xl: 24, xxl: 32, hero: 48 };
   BorderRadius = { sm: 8, md: 12, lg: 16, xl: 24, full: 9999 };
 }
+
+let getExerciseMedia: any;
+try {
+  getExerciseMedia = require('../../services/exercisedb').getExerciseMedia;
+} catch (e) {}
 
 let useStore: any;
 try {
@@ -93,12 +98,186 @@ try {
   // expo-speech not available
 }
 
+// Background audio session (expo-av) - keeps app alive when screen off
+let Audio: any = null;
+let Video: any = null;
+let ResizeMode: any = null;
+try {
+  const av = require('expo-av');
+  Audio = av.Audio;
+  Video = av.Video;
+  ResizeMode = av.ResizeMode;
+} catch (e) {
+  // expo-av not available
+}
+
+// Notifications (Android foreground service hint)
+let Notifications: any = null;
+try {
+  Notifications = require('expo-notifications');
+} catch (e) {
+  // expo-notifications not available
+}
+
+// AdMob interstitial (휴식시간 광고)
+let InterstitialAd: any = null;
+let AdEventType: any = null;
+let TestIds: any = null;
+try {
+  const admob = require('react-native-google-mobile-ads');
+  InterstitialAd = admob.InterstitialAd;
+  AdEventType = admob.AdEventType;
+  TestIds = admob.TestIds;
+} catch (e) {
+  // react-native-google-mobile-ads not available
+}
+
+// 실제 배포 시 아래 ID를 AdMob 콘솔에서 발급받은 실제 광고 단위 ID로 교체
+const ADMOB_INTERSTITIAL_ID = Platform.select({
+  android: TestIds?.INTERSTITIAL ?? 'ca-app-pub-3940256099942544/1033173712',
+  ios: TestIds?.INTERSTITIAL ?? 'ca-app-pub-3940256099942544/4411468910',
+  default: TestIds?.INTERSTITIAL ?? 'ca-app-pub-3940256099942544/1033173712',
+});
+
+const WORKOUT_NOTIF_ID = 'zenfit-workout-active';
+
+const initWorkoutNotificationChannel = async () => {
+  if (Platform.OS !== 'android' || !Notifications) return;
+  try {
+    await Notifications.requestPermissionsAsync();
+    await Notifications.setNotificationChannelAsync('workout-bg', {
+      name: '운동 백그라운드',
+      importance: Notifications.AndroidImportance?.LOW ?? 2,
+      enableVibrate: false,
+      showBadge: false,
+    });
+  } catch (e) {
+    console.log('[ZenFit] Notification channel init failed:', e);
+  }
+};
+
+const updateWorkoutNotification = async (title: string, body: string) => {
+  if (Platform.OS !== 'android' || !Notifications) return;
+  try {
+    await Notifications.scheduleNotificationAsync({
+      identifier: WORKOUT_NOTIF_ID,
+      content: {
+        title,
+        body,
+        sticky: true,
+        autoDismiss: false,
+        data: { workoutActive: true },
+        android: { channelId: 'workout-bg', ongoing: true, priority: 'low' },
+      } as any,
+      trigger: null,
+    });
+  } catch (e) {
+    console.log('[ZenFit] Notification update failed:', e);
+  }
+};
+
+const dismissWorkoutNotification = async () => {
+  if (Platform.OS !== 'android' || !Notifications) return;
+  try {
+    await Notifications.dismissNotificationAsync(WORKOUT_NOTIF_ID);
+  } catch (e) {}
+};
+
+const setupBackgroundAudio = async () => {
+  try {
+    if (Audio?.setAudioModeAsync) {
+      await Audio.setAudioModeAsync({
+        staysActiveInBackground: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+      });
+    }
+  } catch (e) {
+    console.log('[ZenFit] Background audio setup failed:', e);
+  }
+};
+
 // Voice coaching helper
 const speak = (text: string) => {
   try {
     Speech?.speak(text, { language: 'ko-KR', rate: 0.9, pitch: 1.0 });
   } catch (e) {
     // Silently fail if TTS unavailable
+  }
+};
+
+// Pre-recorded Korean number sounds (expo-av) - works in background unlike expo-speech
+const COUNT_SOUND_SOURCES: Record<number, any> = {
+  1: require('../../assets/sounds/1.mp3'),
+  2: require('../../assets/sounds/2.mp3'),
+  3: require('../../assets/sounds/3.mp3'),
+  4: require('../../assets/sounds/4.mp3'),
+  5: require('../../assets/sounds/5.mp3'),
+  6: require('../../assets/sounds/6.mp3'),
+  7: require('../../assets/sounds/7.mp3'),
+  8: require('../../assets/sounds/8.mp3'),
+  9: require('../../assets/sounds/9.mp3'),
+  10: require('../../assets/sounds/10.mp3'),
+  11: require('../../assets/sounds/11.mp3'),
+  12: require('../../assets/sounds/12.mp3'),
+  13: require('../../assets/sounds/13.mp3'),
+  14: require('../../assets/sounds/14.mp3'),
+  15: require('../../assets/sounds/15.mp3'),
+  16: require('../../assets/sounds/16.mp3'),
+  17: require('../../assets/sounds/17.mp3'),
+  18: require('../../assets/sounds/18.mp3'),
+  19: require('../../assets/sounds/19.mp3'),
+  20: require('../../assets/sounds/20.mp3'),
+  21: require('../../assets/sounds/21.mp3'),
+  22: require('../../assets/sounds/22.mp3'),
+  23: require('../../assets/sounds/23.mp3'),
+  24: require('../../assets/sounds/24.mp3'),
+  25: require('../../assets/sounds/25.mp3'),
+  26: require('../../assets/sounds/26.mp3'),
+  27: require('../../assets/sounds/27.mp3'),
+  28: require('../../assets/sounds/28.mp3'),
+  29: require('../../assets/sounds/29.mp3'),
+  30: require('../../assets/sounds/30.mp3'),
+};
+
+const PHRASE_SOUND_SOURCES = {
+  start: require('../../assets/sounds/start.mp3'),
+  set_complete: require('../../assets/sounds/set_complete.mp3'),
+  go: require('../../assets/sounds/go.mp3'),
+  rest: require('../../assets/sounds/rest.mp3'),
+};
+
+let _activeCountSound: any = null;
+
+const playCountAudio = async (source: any) => {
+  try {
+    if (!Audio?.Sound) return;
+    if (_activeCountSound) {
+      _activeCountSound.stopAsync().catch(() => {});
+      _activeCountSound.unloadAsync().catch(() => {});
+      _activeCountSound = null;
+    }
+    const { sound } = await Audio.Sound.createAsync(source, { volume: 1.0 });
+    _activeCountSound = sound;
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate((status: any) => {
+      if (status?.didJustFinish) {
+        sound.unloadAsync().catch(() => {});
+        if (_activeCountSound === sound) _activeCountSound = null;
+      }
+    });
+  } catch (e) {
+    console.log('[ZenFit] Count audio failed:', e);
+  }
+};
+
+const speakCount = (n: number) => {
+  const src = COUNT_SOUND_SOURCES[n];
+  if (src) {
+    playCountAudio(src);
+  } else {
+    // fallback for numbers > 30
+    try { Speech?.speak(`${n}`, { language: 'ko-KR', rate: 1.0 }); } catch (e) {}
   }
 };
 
@@ -158,6 +337,141 @@ function WorkoutScreenInner() {
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [repCount, setRepCount] = useState(0); // Auto voice counting
+  const [autoCountActive, setAutoCountActive] = useState(false); // Auto counting state
+  const [countSpeed, setCountSpeed] = useState(3); // Seconds between counts
+  const [exerciseMedia, setExerciseMedia] = useState<{ imageUrl: string; videoUrl: string } | null>(null);
+  const autoCountRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const silentSoundRef = useRef<any>(null);
+  const interstitialRef = useRef<any>(null);
+  const adReadyRef = useRef(false);
+
+  const loadInterstitialAd = () => {
+    try {
+      if (!InterstitialAd || !AdEventType || !ADMOB_INTERSTITIAL_ID) return;
+      const ad = InterstitialAd.createForAdRequest(ADMOB_INTERSTITIAL_ID, { requestNonPersonalizedAdsOnly: false });
+      ad.addAdEventListener(AdEventType.LOADED, () => { adReadyRef.current = true; });
+      ad.addAdEventListener(AdEventType.CLOSED, () => {
+        adReadyRef.current = false;
+        loadInterstitialAd(); // 다음 휴식을 위해 미리 로드
+      });
+      ad.addAdEventListener(AdEventType.ERROR, () => { adReadyRef.current = false; });
+      ad.load();
+      interstitialRef.current = ad;
+    } catch (e) {
+      console.log('[ZenFit] AdMob load failed:', e);
+    }
+  };
+
+  const showInterstitialIfReady = () => {
+    try {
+      if (adReadyRef.current && interstitialRef.current) {
+        interstitialRef.current.show();
+      }
+    } catch (e) {}
+  };
+
+  // Setup background audio on mount + cleanup on unmount
+  useEffect(() => {
+    setupBackgroundAudio();
+    initWorkoutNotificationChannel();
+    loadInterstitialAd(); // 광고 미리 로드
+    return () => {
+      if (silentSoundRef.current) {
+        silentSoundRef.current.stopAsync().catch(() => {});
+        silentSoundRef.current.unloadAsync().catch(() => {});
+        silentSoundRef.current = null;
+      }
+      dismissWorkoutNotification();
+    };
+  }, []);
+
+  // Background silent audio loop - keeps JS thread alive when screen is off
+  // Starts when exercise/rest phase begins, stops on complete
+  // Also manages Android foreground notification for background process keepalive
+  useEffect(() => {
+    if (phase === 'exercise' || phase === 'rest') {
+      (async () => {
+        try {
+          if (!Audio?.Sound) return;
+          if (silentSoundRef.current) return; // already running
+          const { sound } = await Audio.Sound.createAsync(
+            require('../../assets/silent.wav'),
+            { isLooping: true, volume: 0 }
+          );
+          silentSoundRef.current = sound;
+          await sound.playAsync();
+          console.log('[ZenFit] Background silent loop started');
+        } catch (e) {
+          console.log('[ZenFit] Background loop error:', e);
+        }
+      })();
+      // Android: show ongoing notification (foreground service hint)
+      const exName = plan?.exercises[currentExIndex]?.exercise?.name ?? '운동';
+      const setNum = currentSet + 1;
+      const phaseLabel = phase === 'rest' ? '휴식 중' : `${setNum}세트 진행 중`;
+      updateWorkoutNotification('RunFit 운동 중 🏋️', `${exName} · ${phaseLabel}`);
+    } else {
+      (async () => {
+        try {
+          if (silentSoundRef.current) {
+            await silentSoundRef.current.stopAsync();
+            await silentSoundRef.current.unloadAsync();
+            silentSoundRef.current = null;
+            console.log('[ZenFit] Background silent loop stopped');
+          }
+        } catch (e) {}
+      })();
+      dismissWorkoutNotification();
+    }
+  }, [phase, currentExIndex, currentSet]);
+
+  // Auto counting effect - counts reps automatically with voice
+  useEffect(() => {
+    if (autoCountActive && voiceEnabled && phase === 'exercise') {
+      const currentPlan = plan?.exercises[currentExIndex];
+      if (!currentPlan) return;
+      const targetReps = parseInt(currentPlan.setDetails[currentSet]?.reps) || 15;
+
+      autoCountRef.current = setInterval(() => {
+        setRepCount((prev) => {
+          const next = prev + 1;
+          speakCount(next);
+          vibrate(50);
+          if (next >= targetReps) {
+            // Finished counting - stop auto count
+            setTimeout(() => {
+              setAutoCountActive(false);
+              playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
+            }, 500);
+          }
+          return next;
+        });
+      }, countSpeed * 1000);
+
+      // Play "시작" sound when auto count begins
+      if (repCount === 0) {
+        playCountAudio(PHRASE_SOUND_SOURCES.start);
+      }
+    }
+    return () => {
+      if (autoCountRef.current) {
+        clearInterval(autoCountRef.current);
+        autoCountRef.current = null;
+      }
+    };
+  }, [autoCountActive, voiceEnabled, phase, countSpeed, currentExIndex, currentSet]);
+
+  // Fetch exercise media from ExerciseDB when exercise changes
+  useEffect(() => {
+    if (!plan || phase === 'preview' || phase === 'complete') return;
+    const ex = plan.exercises[currentExIndex]?.exercise;
+    if (!ex || !getExerciseMedia) return;
+    setExerciseMedia(null);
+    getExerciseMedia(ex.name, ex.bodyPart).then((media: any) => {
+      if (media?.imageUrl) setExerciseMedia(media);
+    }).catch(() => {});
+  }, [currentExIndex, phase, plan]);
 
   // Generate workout plan
   useEffect(() => {
@@ -195,7 +509,7 @@ function WorkoutScreenInner() {
             setIsTimerRunning(false);
             vibrate(500);
             setPhase('exercise');
-            speak('가보자!');
+            playCountAudio(PHRASE_SOUND_SOURCES.go);
             return 0;
           }
           return prev - 1;
@@ -257,6 +571,8 @@ function WorkoutScreenInner() {
     setCurrentExIndex(0);
     setCurrentSet(0);
     setTimer(0);
+    setRepCount(0);
+    setAutoCountActive(false);
     setIsTimerRunning(true);
     if (voiceEnabled) {
       try {
@@ -270,6 +586,7 @@ function WorkoutScreenInner() {
 
   const handleSetComplete = () => {
     vibrate(200);
+    setAutoCountActive(false);
 
     // Mark current set as completed
     const updated = { ...plan };
@@ -280,9 +597,11 @@ function WorkoutScreenInner() {
       // More sets remaining - start rest
       const nextSet = currentSet + 1;
       setCurrentSet(nextSet);
+      setRepCount(0);
       setRestTime(currentPlanItem.restSeconds);
       setPhase('rest');
       setIsTimerRunning(true);
+      showInterstitialIfReady(); // 휴식시간 광고
       if (voiceEnabled) {
         speak(`${currentSet + 1}세트 완료! 잠시 쉬세요.`);
       }
@@ -292,9 +611,11 @@ function WorkoutScreenInner() {
       const nextEx = plan.exercises[nextIdx].exercise;
       setCurrentExIndex(nextIdx);
       setCurrentSet(0);
+      setRepCount(0);
       setRestTime(currentPlanItem.restSeconds + 15);
       setPhase('rest');
       setIsTimerRunning(true);
+      showInterstitialIfReady(); // 운동 간 휴식시간 광고
       if (voiceEnabled) {
         speak(`${currentPlanItem.exercise.name} 완료! 다음은 ${nextEx.name}입니다.`);
       }
@@ -307,6 +628,7 @@ function WorkoutScreenInner() {
     if (timerRef.current) clearInterval(timerRef.current);
     setIsTimerRunning(false);
     setRestTime(0);
+    setRepCount(0);
     setPhase('exercise');
     setIsTimerRunning(true);
     if (voiceEnabled) {
@@ -318,6 +640,7 @@ function WorkoutScreenInner() {
 
   const handleWorkoutComplete = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setAutoCountActive(false);
     setIsTimerRunning(false);
     setPhase('complete');
 
@@ -664,12 +987,86 @@ function WorkoutScreenInner() {
             </View>
           )}
 
+          {/* Exercise Media (ExerciseDB video or image) */}
+          {exerciseMedia?.videoUrl && Video ? (
+            <View style={styles.exerciseMediaCard}>
+              <Video
+                source={{ uri: exerciseMedia.videoUrl }}
+                style={styles.exerciseMediaImage}
+                resizeMode={ResizeMode?.COVER ?? 'cover'}
+                shouldPlay
+                isLooping
+                isMuted
+                useNativeControls={false}
+              />
+            </View>
+          ) : exerciseMedia?.imageUrl ? (
+            <View style={styles.exerciseMediaCard}>
+              <Image
+                source={{ uri: exerciseMedia.imageUrl }}
+                style={styles.exerciseMediaImage}
+                resizeMode="cover"
+              />
+            </View>
+          ) : null}
+
           {/* Exercise Info */}
           <Text style={styles.exPhaseTitle}>{ex.name}</Text>
           <Text style={styles.exPhaseSubtitle}>
             {BODY_PART_EMOJI[ex.bodyPart]} {BODY_PART_LABELS[ex.bodyPart]}
             {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
           </Text>
+
+          {/* Auto Voice Counter - background audio supported */}
+          {voiceEnabled && !sd.reps.includes('초') && (
+            <View style={styles.autoCounterContainer}>
+              {/* Count display */}
+              <View style={styles.repCounterBtn}>
+                <Text style={styles.repCounterNumber}>{repCount}</Text>
+                <Text style={styles.repCounterLabel}>/ {sd.reps}회</Text>
+              </View>
+
+              {/* Control buttons */}
+              <View style={styles.autoCountControls}>
+                {!autoCountActive ? (
+                  <TouchableOpacity
+                    style={styles.autoCountStartBtn}
+                    onPress={() => {
+                      setRepCount(0);
+                      setAutoCountActive(true);
+                    }}
+                  >
+                    <Text style={styles.autoCountStartText}>
+                      {repCount > 0 ? '다시 시작' : '자동 카운트 시작'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.autoCountStopBtn}
+                    onPress={() => setAutoCountActive(false)}
+                  >
+                    <Text style={styles.autoCountStopText}>일시정지</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Speed control */}
+              <View style={styles.speedRow}>
+                <Text style={styles.speedLabel}>속도:</Text>
+                {[2, 3, 4, 5].map((s) => (
+                  <TouchableOpacity
+                    key={s}
+                    style={[styles.speedBtn, countSpeed === s && styles.speedBtnActive]}
+                    onPress={() => setCountSpeed(s)}
+                  >
+                    <Text style={[styles.speedBtnText, countSpeed === s && styles.speedBtnTextActive]}>
+                      {s}초
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* Set Details (PlanFit style) */}
           <ScrollView style={styles.setListScroll} showsVerticalScrollIndicator={false}>
@@ -1016,6 +1413,12 @@ const styles = StyleSheet.create({
   },
   progressBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 2 },
 
+  exerciseMediaCard: {
+    width: '100%', height: 160, borderRadius: BorderRadius.lg, overflow: 'hidden',
+    marginTop: Spacing.md, backgroundColor: Colors.card,
+  },
+  exerciseMediaImage: { width: '100%', height: '100%' },
+
   tipCard: {
     backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.lg,
     marginTop: Spacing.lg, alignItems: 'center',
@@ -1024,6 +1427,59 @@ const styles = StyleSheet.create({
 
   exPhaseTitle: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.text, textAlign: 'center', marginTop: Spacing.lg },
   exPhaseSubtitle: { fontSize: FontSize.sm, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs },
+
+  // Auto Counter
+  autoCounterContainer: {
+    marginTop: Spacing.md,
+  },
+  repCounterBtn: {
+    backgroundColor: Colors.card, borderRadius: BorderRadius.xl, padding: Spacing.md,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Colors.primary,
+  },
+  repCounterNumber: {
+    fontSize: 56, fontWeight: '900', color: Colors.primary,
+  },
+  repCounterLabel: {
+    fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing.xs,
+  },
+  autoCountControls: {
+    flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm,
+  },
+  autoCountStartBtn: {
+    flex: 1, backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md, alignItems: 'center',
+  },
+  autoCountStartText: {
+    fontSize: FontSize.md, fontWeight: '700', color: Colors.background,
+  },
+  autoCountStopBtn: {
+    flex: 1, backgroundColor: Colors.accent, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md, alignItems: 'center',
+  },
+  autoCountStopText: {
+    fontSize: FontSize.md, fontWeight: '700', color: '#fff',
+  },
+  speedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginTop: Spacing.sm, justifyContent: 'center',
+  },
+  speedLabel: {
+    fontSize: FontSize.xs, color: Colors.textMuted, fontWeight: '600',
+  },
+  speedBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.full,
+  },
+  speedBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  speedBtnText: {
+    fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: '600',
+  },
+  speedBtnTextActive: {
+    color: Colors.background,
+  },
 
   setListScroll: { flex: 1, marginTop: Spacing.lg },
 
