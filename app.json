@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "ZenFit",
-    "slug": "zenfit",
-    "version": "1.0.0",
+    "name": "RunFit",
+    "slug": "runfit",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.zenfit.app"
+      "bundleIdentifier": "com.zenfit.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +26,11 @@
         "backgroundColor": "#0D0D0D"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.zenfit.app"
+      "package": "com.zenfit.app",
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -38,21 +45,28 @@
           "icon": "./assets/icon.png",
           "color": "#4EEEB0"
         }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
       ]
     ],
     "experiments": {},
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "6a2ef220-866f-4ab6-b66f-1b57226f7cdf"
+        "projectId": "85c9e625-34ce-4702-a9ad-599b7d60b599"
       }
     },
-    "owner": "seungyeoljeon",
+    "owner": "jsy6187",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/6a2ef220-866f-4ab6-b66f-1b57226f7cdf"
+      "url": "https://u.expo.dev/85c9e625-34ce-4702-a9ad-599b7d60b599"
     }
   }
 }
