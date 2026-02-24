@@ -13,9 +13,6 @@
       "distribution": "internal",
       "channel": "preview",
       "credentialsSource": "local",
-      "env": {
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyBIRJB3nO_uhIqJUcDMwlVXYO49ISg5F1c"
-      },
       "android": {
         "buildType": "apk"
       }
@@ -23,10 +20,7 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "credentialsSource": "local",
-      "env": {
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyBIRJB3nO_uhIqJUcDMwlVXYO49ISg5F1c"
-      }
+      "credentialsSource": "local"
     }
   },
   "submit": {
