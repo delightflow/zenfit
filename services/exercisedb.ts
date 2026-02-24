@@ -52,16 +52,7 @@ const KR_TO_EDB_ID: Record<string, string> = {
   '바비 컬':          'exr_41n2hc2VrB8ofxrW',
 };
 
-// ─── Fallback: bodypart → bodypart image from EDB CDN ─────────────────────────
-const BODYPART_IMAGE: Record<string, string> = {
-  chest:    'https://cdn.exercisedb.dev/bodyparts/chest.webp',
-  back:     'https://cdn.exercisedb.dev/bodyparts/back.webp',
-  shoulder: 'https://cdn.exercisedb.dev/bodyparts/shoulders.webp',
-  arms:     'https://cdn.exercisedb.dev/bodyparts/upper%20arms.webp',
-  legs:     'https://cdn.exercisedb.dev/bodyparts/upper%20legs.webp',
-  core:     'https://cdn.exercisedb.dev/bodyparts/waist.webp',
-  cardio:   'https://cdn.exercisedb.dev/bodyparts/waist.webp',
-};
+// No external CDN fallback - use emoji placeholder in UI instead
 
 const CACHE_PREFIX = 'edb_exercise_';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -119,11 +110,9 @@ export async function getExerciseMedia(
   koreanName: string,
   bodyPart: string
 ): Promise<{ imageUrl: string; videoUrl: string; matched: boolean }> {
-  const fallbackImage = BODYPART_IMAGE[bodyPart] || BODYPART_IMAGE['core'];
-
   const exerciseId = KR_TO_EDB_ID[koreanName];
   if (!exerciseId) {
-    return { imageUrl: fallbackImage, videoUrl: '', matched: false };
+    return { imageUrl: '', videoUrl: '', matched: false };
   }
 
   // Check cache
@@ -139,5 +128,5 @@ export async function getExerciseMedia(
     return { imageUrl: media.imageUrl, videoUrl: media.videoUrl, matched: true };
   }
 
-  return { imageUrl: fallbackImage, videoUrl: '', matched: false };
+  return { imageUrl: '', videoUrl: '', matched: false };
 }

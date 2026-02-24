@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../constants/theme';
 import { useStore, UserProfile } from '../../store/useStore';
+
+let Updates: any = null;
+try { Updates = require('expo-updates'); } catch (e) {}
 
 export default function ProfileScreen() {
   const profile = useStore((s) => s.profile);
@@ -12,6 +15,35 @@ export default function ProfileScreen() {
   const workoutLogs = useStore((s) => s.workoutLogs);
   const [editMode, setEditMode] = useState(false);
   const [editProfile, setEditProfile] = useState<UserProfile | null>(null);
+  const [updateMsg, setUpdateMsg] = useState('');
+  const [updateLoading, setUpdateLoading] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    if (!Updates) { setUpdateMsg('업데이트 모듈 없음'); return; }
+    if (Updates.isEnabled === false) {
+      setUpdateMsg('이 빌드는 OTA 업데이트를 지원하지 않습니다.\n앱을 재시작하면 자동 업데이트가 적용됩니다.');
+      setTimeout(() => { setUpdateMsg(''); setUpdateLoading(false); }, 5000);
+      return;
+    }
+    try {
+      setUpdateLoading(true);
+      setUpdateMsg('확인 중...');
+      const check = await Updates.checkForUpdateAsync();
+      if (check.isAvailable) {
+        setUpdateMsg('다운로드 중...');
+        await Updates.fetchUpdateAsync();
+        setUpdateMsg('적용 중...');
+        await Updates.reloadAsync();
+      } else {
+        setUpdateMsg('최신 버전입니다.\n(앱 재시작 시 자동 적용됩니다)');
+        setTimeout(() => { setUpdateMsg(''); setUpdateLoading(false); }, 3000);
+      }
+    } catch (e: any) {
+      const errMsg = e?.message || '오류';
+      setUpdateMsg(errMsg.slice(0, 120));
+      setTimeout(() => { setUpdateMsg(''); setUpdateLoading(false); }, 6000);
+    }
+  };
 
   const goalLabels: Record<string, string> = { lose: '체중 감량', gain: '근육 증가', maintain: '체력 유지' };
   const expLabels: Record<string, string> = { beginner: '초보', intermediate: '중급', advanced: '고급' };
@@ -143,12 +175,75 @@ export default function ProfileScreen() {
             <Text style={[styles.settingLabel, { color: Colors.accent }]}>🔄 온보딩 다시 하기</Text>
             <Text style={styles.settingArrow}>→</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.settingRow} onPress={handleCheckUpdate} disabled={updateLoading}>
+            <Text style={styles.settingLabel}>
+              {updateLoading ? '🔄 ' : '⬇️ '}업데이트 확인
+            </Text>
+            {updateLoading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={styles.settingArrow}>→</Text>}
+          </TouchableOpacity>
+          {updateMsg ? (
+            <Text style={{ color: Colors.primary, fontSize: FontSize.xs, paddingHorizontal: Spacing.sm, paddingBottom: Spacing.sm }}>
+              {updateMsg}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Version history */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>업데이트 이력</Text>
+          {[
+            {
+              version: 'v1.1.1',
+              date: '2026-02-23',
+              changes: ['TTS→mp3 교체: 잠금화면 음성 끊김 수정', 'AI 체형분석 오류 메시지 개선', '현재 OTA 버전 정보 표시'],
+            },
+            {
+              version: 'v1.1.0',
+              date: '2026-02-23',
+              changes: ['음성 ON 시 네비바 가림 현상 수정', '백그라운드 음성 카운팅 안정성 개선', '운동 이미지 로딩 개선', '앱 이름 RunFit으로 변경', 'AdMob 휴식시간 광고 준비'],
+            },
+            {
+              version: 'v1.0.2',
+              date: '2026-02-23',
+              changes: ['화면 꺼져도 운동 카운팅 음성 유지 (백그라운드 재생)', 'Android 포그라운드 서비스 지원'],
+            },
+            {
+              version: 'v1.0.1',
+              date: '2026-02-21',
+              changes: ['운동 자동 카운팅 기능 추가', '한국어 음성 코칭'],
+            },
+            {
+              version: 'v1.0.0',
+              date: '2026-02-01',
+              changes: ['최초 출시', 'AI 맞춤 운동 플랜', '스트릭 & 운동 기록'],
+            },
+          ].map((item) => (
+            <View key={item.version} style={styles.versionItem}>
+              <View style={styles.versionHeader}>
+                <Text style={styles.versionTag}>{item.version}</Text>
+                <Text style={styles.versionDate}>{item.date}</Text>
+              </View>
+              {item.changes.map((c, i) => (
+                <Text key={i} style={styles.versionChange}>· {c}</Text>
+              ))}
+            </View>
+          ))}
         </View>
 
         {/* App info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appInfoText}>ZenFit v1.0.0</Text>
-          <Text style={styles.appInfoText}>Duolingo-style Fitness</Text>
+          <Text style={styles.appInfoText}>RunFit v1.1.0</Text>
+          <Text style={styles.appInfoText}>나만의 AI 운동 습관</Text>
+          <Text style={{ color: Colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'center' }}>
+            {Updates?.updateId
+              ? `OTA: ${String(Updates.updateId).slice(0, 8)}...`
+              : Updates?.isEmbeddedLaunch === false
+                ? 'OTA 적용됨'
+                : '기본 번들'}
+          </Text>
+          <Text style={{ color: Colors.textMuted, fontSize: 10, textAlign: 'center' }}>
+            {`ch: ${Updates?.channel || '-'} | rt: ${Updates?.runtimeVersion || '-'}`}
+          </Text>
         </View>
 
         <View style={{ height: Spacing.xxl }} />
@@ -297,6 +392,12 @@ const styles = StyleSheet.create({
 
   appInfo: { alignItems: 'center', marginTop: Spacing.lg },
   appInfoText: { fontSize: FontSize.xs, color: Colors.textMuted },
+
+  versionItem: { width: '100%', marginBottom: Spacing.md },
+  versionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.xs },
+  versionTag: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.primary },
+  versionDate: { fontSize: FontSize.xs, color: Colors.textMuted },
+  versionChange: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },

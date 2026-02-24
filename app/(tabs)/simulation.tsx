@@ -10,8 +10,8 @@ import { useStore, BodyPhoto } from '../../store/useStore';
 import Svg, { Rect, Text as SvgText, Line } from 'react-native-svg';
 import Constants from 'expo-constants';
 
-const GEMINI_KEY = Constants.expoConfig?.extra?.EXPO_PUBLIC_GEMINI_API_KEY
-  || process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY
+  || Constants.expoConfig?.extra?.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const { width: SCREEN_W } = Dimensions.get('window');
 const PHOTO_SIZE = (SCREEN_W - Spacing.lg * 2 - Spacing.sm) / 2;
 
@@ -88,7 +88,7 @@ function MiniChart({ data, color, label, unit }: { data: number[], color: string
 
 // ─── Gemini Vision Analysis ───
 async function analyzeBodyPhoto(base64: string, profile: any): Promise<string> {
-  if (!GEMINI_KEY) return '(API 키가 설정되지 않았습니다)';
+  if (!GEMINI_KEY) return '(API 키가 설정되지 않았습니다. 앱을 업데이트해주세요.)';
   try {
     const prompt = `당신은 피트니스 전문 트레이너입니다. 이 체형 사진을 분석해주세요.
 
@@ -104,7 +104,7 @@ async function analyzeBodyPhoto(base64: string, profile: any): Promise<string> {
 친근하고 동기부여가 되는 톤으로 작성해주세요. 한국어로 답변하세요.`;
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,10 +118,20 @@ async function analyzeBodyPhoto(base64: string, profile: any): Promise<string> {
         }),
       }
     );
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('[ZenFit] Gemini API error:', res.status, errText);
+      return `분석 실패 (${res.status}). 잠시 후 다시 시도해주세요.`;
+    }
     const json = await res.json();
+    if (json?.error) {
+      console.error('[ZenFit] Gemini error:', json.error);
+      return `AI 분석 오류: ${json.error.message || '알 수 없는 오류'}`;
+    }
     return json?.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과를 가져올 수 없습니다.';
-  } catch (e) {
-    return '분석 중 오류가 발생했습니다. 네트워크를 확인해주세요.';
+  } catch (e: any) {
+    console.error('[ZenFit] Gemini fetch error:', e);
+    return `분석 중 오류: ${e?.message || '네트워크를 확인해주세요.'}`;
   }
 }
 
@@ -194,23 +204,37 @@ export default function SimulationScreen() {
       };
       addBodyPhoto(newPhoto);
 
-      // Get base64 - on web, may need manual conversion
+      // Get base64 - may need manual conversion on some platforms
       let base64Data = asset.base64;
       if (!base64Data && asset.uri) {
         try {
-          const response = await fetch(asset.uri);
-          const blob = await response.blob();
-          base64Data = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const dataUrl = reader.result as string;
-              resolve(dataUrl.split(',')[1]);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        } catch {
-          // base64 conversion failed - photo still saved, just no AI analysis
+          if (Platform.OS === 'web') {
+            const response = await fetch(asset.uri);
+            const blob = await response.blob();
+            base64Data = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const dataUrl = reader.result as string;
+                resolve(dataUrl.split(',')[1]);
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } else {
+            // Native: re-pick with base64 flag if missing
+            const retryResult = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              quality: 0.7,
+              base64: true,
+              allowsEditing: true,
+              aspect: [3, 4] as [number, number],
+            });
+            if (!retryResult.canceled && retryResult.assets?.[0]?.base64) {
+              base64Data = retryResult.assets[0].base64;
+            }
+          }
+        } catch (convErr) {
+          console.error('[ZenFit] Base64 conversion error:', convErr);
         }
       }
 
@@ -222,6 +246,8 @@ export default function SimulationScreen() {
         setAnalyzing(null);
       } else if (!GEMINI_KEY) {
         updateBodyPhoto(id, { aiAnalysis: '(API 키 미설정 - AI 분석 불가)' });
+      } else if (!base64Data) {
+        updateBodyPhoto(id, { aiAnalysis: '(이미지 변환 실패 - 사진은 저장됨)' });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '사진을 불러올 수 없습니다.';

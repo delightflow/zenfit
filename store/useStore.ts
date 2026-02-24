@@ -11,6 +11,9 @@ export interface UserProfile {
   goal: 'lose' | 'gain' | 'maintain';
   experience: 'beginner' | 'intermediate' | 'advanced';
   workoutDays: number[]; // 0=Sun, 1=Mon, ...
+  estimatedOneRM?: { bench: number; squat: number; deadlift: number };
+  focusAreas?: string[];
+  planWeeks?: number; // 플랜 기간 (주)
 }
 
 export interface WorkoutLog {

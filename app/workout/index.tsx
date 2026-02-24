@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert, Image, NativeModules, BackHandler, AppState, PanResponder, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
@@ -98,6 +98,162 @@ try {
   // expo-speech not available
 }
 
+// ===== 잠금 화면 오버레이 컴포넌트 =====
+// 경쟁사 앱(GymStreak 등) 스타일: 어두운 오버레이 + 총 운동 시간 + 밀어서 잠금 해제
+function WorkoutLockScreen({
+  startTimestamp,
+  exerciseName,
+  progress,
+  restTime,
+  phase,
+  onUnlock,
+  onPrev,
+  onNext,
+}: {
+  startTimestamp: number;
+  exerciseName: string;
+  progress: string;
+  restTime: number;
+  phase: string;
+  onUnlock: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(Math.floor((Date.now() - startTimestamp) / 1000));
+  useEffect(() => {
+    const t = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimestamp) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [startTimestamp]);
+
+  const slideX = useRef(new Animated.Value(0)).current;
+  const SLIDE_WIDTH = 260;
+  const THUMB_SIZE = 52;
+  const THRESHOLD = SLIDE_WIDTH - THUMB_SIZE - 16;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderMove: (_, gs) => {
+        const x = Math.max(0, Math.min(gs.dx, THRESHOLD));
+        slideX.setValue(x);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dx >= THRESHOLD) {
+          onUnlock();
+          slideX.setValue(0);
+        } else {
+          Animated.spring(slideX, { toValue: 0, useNativeDriver: false }).start();
+        }
+      },
+    })
+  ).current;
+
+  const formatT = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  };
+
+  return (
+    <View style={lockStyles.overlay}>
+      {/* 상단: 진행 상태 */}
+      <View style={lockStyles.topInfo}>
+        <Text style={lockStyles.topProgress}>{progress}</Text>
+        <Text style={lockStyles.topExName}>{exerciseName}</Text>
+      </View>
+
+      {/* 중앙: 총 운동 시간 */}
+      <View style={lockStyles.center}>
+        <Text style={lockStyles.totalLabel}>총 운동 시간</Text>
+        <Text style={lockStyles.totalTime}>{formatT(elapsed)}</Text>
+        {phase === 'rest' && (
+          <Text style={lockStyles.restCountdown}>{formatT(restTime)}</Text>
+        )}
+      </View>
+
+      {/* 밀어서 잠금 해제 */}
+      <View style={lockStyles.sliderTrack}>
+        <Text style={lockStyles.sliderLabel}>밀어서 잠금 해제</Text>
+        <Animated.View
+          style={[lockStyles.sliderThumb, { transform: [{ translateX: slideX }] }]}
+          {...panResponder.panHandlers}
+        >
+          <Text style={lockStyles.sliderArrow}>→</Text>
+        </Animated.View>
+      </View>
+
+      {/* 하단 네비게이션 */}
+      <View style={lockStyles.navRow}>
+        <TouchableOpacity style={lockStyles.navBtn} onPress={onPrev}>
+          <Text style={lockStyles.navText}>⏮</Text>
+        </TouchableOpacity>
+        <View style={lockStyles.navCenter} />
+        <TouchableOpacity style={lockStyles.navBtn} onPress={onNext}>
+          <Text style={lockStyles.navText}>⏭</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const lockStyles = StyleSheet.create({
+  overlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    zIndex: 999,
+    justifyContent: 'space-between',
+    paddingTop: 60, paddingBottom: 40, paddingHorizontal: 24,
+  },
+  topInfo: { alignItems: 'flex-start' },
+  topProgress: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '600' },
+  topExName: { color: 'rgba(255,255,255,0.85)', fontSize: 20, fontWeight: '700', marginTop: 4 },
+  center: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  totalLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  totalTime: { color: '#FFFFFF', fontSize: 80, fontWeight: '800', letterSpacing: 2 },
+  restCountdown: { color: 'rgba(255,255,255,0.4)', fontSize: 28, fontWeight: '700', marginTop: 8 },
+  sliderTrack: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 40, height: 68, width: 280,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    overflow: 'hidden',
+    marginBottom: 32,
+  },
+  sliderLabel: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 15, fontWeight: '600',
+    textAlign: 'center',
+  },
+  sliderThumb: {
+    position: 'absolute', left: 8,
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  sliderArrow: { fontSize: 22, color: '#0D0D0D' },
+  navRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  navBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  navText: { fontSize: 22, color: 'rgba(255,255,255,0.7)' },
+  navCenter: { flex: 1 },
+});
+
+// Keep screen awake during workout (운동 중 화면 꺼짐 방지)
+let useKeepAwake: any = null;
+try {
+  useKeepAwake = require('expo-keep-awake').useKeepAwake;
+} catch (e) {
+  // expo-keep-awake not available
+}
+
 // Background audio session (expo-av) - keeps app alive when screen off
 let Audio: any = null;
 let Video: any = null;
@@ -156,30 +312,21 @@ const initWorkoutNotificationChannel = async () => {
   }
 };
 
-const updateWorkoutNotification = async (title: string, body: string) => {
-  if (Platform.OS !== 'android' || !Notifications) return;
+const AudioService = NativeModules.AudioServiceModule;
+
+const updateWorkoutNotification = (title: string, body: string) => {
+  if (Platform.OS !== 'android') return;
   try {
-    await Notifications.scheduleNotificationAsync({
-      identifier: WORKOUT_NOTIF_ID,
-      content: {
-        title,
-        body,
-        sticky: true,
-        autoDismiss: false,
-        data: { workoutActive: true },
-        android: { channelId: 'workout-bg', ongoing: true, priority: 'low' },
-      } as any,
-      trigger: null,
-    });
+    AudioService?.start(title, body);
   } catch (e) {
-    console.log('[ZenFit] Notification update failed:', e);
+    console.log('[ZenFit] AudioService start failed:', e);
   }
 };
 
-const dismissWorkoutNotification = async () => {
-  if (Platform.OS !== 'android' || !Notifications) return;
+const dismissWorkoutNotification = () => {
+  if (Platform.OS !== 'android') return;
   try {
-    await Notifications.dismissNotificationAsync(WORKOUT_NOTIF_ID);
+    AudioService?.stop();
   } catch (e) {}
 };
 
@@ -247,9 +394,38 @@ const PHRASE_SOUND_SOURCES = {
   rest: require('../../assets/sounds/rest.mp3'),
 };
 
+// Android: 네이티브 MediaPlayer로 res/raw 사운드 재생 (백그라운드/잠금화면 완전 지원)
+// iOS: expo-av (staysActiveInBackground 로 백그라운드 지원)
+// sound name 규칙: count_1 ~ count_30, phrase_start, phrase_set_complete, phrase_go, phrase_rest
+const PHRASE_NATIVE_NAMES: Record<string, string> = {
+  start: 'phrase_start',
+  set_complete: 'phrase_set_complete',
+  go: 'phrase_go',
+  rest: 'phrase_rest',
+};
+
+const _sourceToNativeName = new Map<any, string>();
+Object.entries(COUNT_SOUND_SOURCES).forEach(([n, src]) => {
+  _sourceToNativeName.set(src, `count_${n}`);
+});
+Object.entries(PHRASE_SOUND_SOURCES).forEach(([key, src]) => {
+  _sourceToNativeName.set(src, PHRASE_NATIVE_NAMES[key] ?? key);
+});
+
 let _activeCountSound: any = null;
 
 const playCountAudio = async (source: any) => {
+  // Android: 네이티브 재생 (Foreground Service의 MediaPlayer — 백그라운드/잠금화면 동작)
+  if (Platform.OS === 'android') {
+    try {
+      const name = _sourceToNativeName.get(source);
+      if (name) AudioService?.playSound(name);
+    } catch (e) {
+      console.log('[ZenFit] Native playSound failed:', e);
+    }
+    return;
+  }
+  // iOS: expo-av
   try {
     if (!Audio?.Sound) return;
     if (_activeCountSound) {
@@ -320,6 +496,9 @@ export default function WorkoutScreenWrapper() {
 }
 
 function WorkoutScreenInner() {
+  // 운동 중 화면 꺼짐/잠금 방지 (소리 재생이 포그라운드에서 안정적으로 동작)
+  useKeepAwake?.();
+
   const profile = useStore((s: any) => s.profile);
   const completeToday = useStore((s: any) => s.completeToday);
   const addWorkoutLog = useStore((s: any) => s.addWorkoutLog);
@@ -336,15 +515,88 @@ function WorkoutScreenInner() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [swapIndex, setSwapIndex] = useState<number | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [activeSplit, setActiveSplit] = useState<'A' | 'B' | 'C' | null>(null); // A/B/C 분할 루틴
+  const [showAddExercise, setShowAddExercise] = useState(false); // 운동 추가 모달
+  const [addSearchQuery, setAddSearchQuery] = useState(''); // 운동 추가 검색
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceOnlyMode, setVoiceOnlyMode] = useState(false); // 음성 전용 모드 (화면 꺼짐 허용 + TTS 운동명 읽기)
   const [repCount, setRepCount] = useState(0); // Auto voice counting
   const [autoCountActive, setAutoCountActive] = useState(false); // Auto counting state
   const [countSpeed, setCountSpeed] = useState(3); // Seconds between counts
   const [exerciseMedia, setExerciseMedia] = useState<{ imageUrl: string; videoUrl: string } | null>(null);
   const autoCountRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const silentSoundRef = useRef<any>(null);
+  const exerciseStartAtRef = useRef<number>(0); // wall clock: 운동 타이머 시작 시각
+  const restEndAtRef = useRef<number>(0);       // wall clock: 휴식 종료 예정 시각
   const interstitialRef = useRef<any>(null);
   const adReadyRef = useRef(false);
+
+  // A/B/C 분할 루틴 정의
+  const SPLITS = {
+    A: { label: 'A 분할', emoji: '🫁', desc: '가슴 · 삼두', parts: ['chest', 'arms'] },
+    B: { label: 'B 분할', emoji: '🔙', desc: '등 · 이두', parts: ['back', 'arms'] },
+    C: { label: 'C 분할', emoji: '🦵', desc: '하체 · 어깨', parts: ['legs', 'shoulder'] },
+  } as const;
+
+  // 분할 선택 시 플랜 재생성
+  const handleSelectSplit = (split: 'A' | 'B' | 'C') => {
+    if (!profile) return;
+    try {
+      const splitParts = SPLITS[split].parts as any[];
+      const goal = profile.goal || 'maintain';
+      const experience = profile.experience || 'beginner';
+      const newPlan = generateWorkoutPlan(goal, experience, splitParts);
+      if (newPlan && newPlan.exercises.length > 0) {
+        setPlan(newPlan);
+        setActiveSplit(split);
+      }
+    } catch (e) {
+      console.log('[ZenFit] Split plan error:', e);
+    }
+  };
+
+  // 운동 추가 핸들러
+  const handleAddExercise = (ex: any) => {
+    if (!plan) return;
+    const defaultWeight = ex.equipment === 'bodyweight' ? 0 : 20;
+    const newItem = {
+      exercise: ex,
+      setDetails: Array.from({ length: ex.defaultSets }, () => ({ weight: defaultWeight, reps: ex.defaultReps })),
+      restSeconds: ex.restSeconds,
+    };
+    setPlan({ ...plan, exercises: [...plan.exercises, newItem] });
+    setShowAddExercise(false);
+    setAddSearchQuery('');
+  };
+
+  // 운동 중 종료 확인 다이얼로그
+  const confirmExit = useCallback(() => {
+    if (phase === 'exercise' || phase === 'rest') {
+      Alert.alert(
+        '운동을 종료하시겠어요?',
+        '지금까지의 진행 상황이 저장되지 않습니다.',
+        [
+          { text: '계속하기', style: 'cancel' },
+          {
+            text: '종료',
+            style: 'destructive',
+            onPress: () => {
+              dismissWorkoutNotification();
+              router.back();
+            },
+          },
+        ]
+      );
+      return true; // BackHandler 이벤트 소비
+    }
+    return false;
+  }, [phase]);
+
+  // Android 하드웨어 뒤로가기 버튼 처리
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', confirmExit);
+    return () => sub.remove();
+  }, [confirmExit]);
 
   const loadInterstitialAd = () => {
     try {
@@ -395,8 +647,10 @@ function WorkoutScreenInner() {
         try {
           if (!Audio?.Sound) return;
           if (silentSoundRef.current) return; // already running
+          // Use a real (non-silent) audio source at near-zero volume.
+          // Android drops truly silent streams, killing the JS thread.
           const { sound } = await Audio.Sound.createAsync(
-            require('../../assets/silent.wav'),
+            COUNT_SOUND_SOURCES[1],
             { isLooping: true, volume: 0.001 }
           );
           silentSoundRef.current = sound;
@@ -469,8 +723,10 @@ function WorkoutScreenInner() {
     if (!ex || !getExerciseMedia) return;
     setExerciseMedia(null);
     getExerciseMedia(ex.name, ex.bodyPart).then((media: any) => {
-      if (media?.imageUrl) setExerciseMedia(media);
-    }).catch(() => {});
+      setExerciseMedia({ imageUrl: media?.imageUrl || '', videoUrl: media?.videoUrl || '' });
+    }).catch(() => {
+      setExerciseMedia({ imageUrl: '', videoUrl: '' });
+    });
   }, [currentExIndex, phase, plan]);
 
   // Generate workout plan
@@ -499,31 +755,94 @@ function WorkoutScreenInner() {
     }
   }, [profile]);
 
-  // Timer logic
+  // Timer logic — wall clock 기반 (홈/잠금화면 복귀 후도 정확)
   useEffect(() => {
-    if (isTimerRunning && phase === 'rest') {
+    if (!isTimerRunning) return;
+
+    if (phase === 'rest') {
+      // 휴식 카운트다운: restEndAt 기준 남은 시간
+      if (restEndAtRef.current === 0) {
+        restEndAtRef.current = Date.now() + restTime * 1000;
+      }
       timerRef.current = setInterval(() => {
-        setRestTime((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            setIsTimerRunning(false);
-            vibrate(500);
-            setPhase('exercise');
-            playCountAudio(PHRASE_SOUND_SOURCES.go);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else if (isTimerRunning && phase === 'exercise') {
+        const remaining = Math.ceil((restEndAtRef.current - Date.now()) / 1000);
+        if (remaining <= 0) {
+          restEndAtRef.current = 0;
+          setRestTime(0);
+          vibrate(500);
+          setPhase('exercise'); // isTimerRunning 유지 → exercise 타이머 자동 재시작
+          playCountAudio(PHRASE_SOUND_SOURCES.go);
+        } else {
+          setRestTime(remaining);
+        }
+      }, 500);
+    } else if (phase === 'exercise') {
+      // 운동 경과 타이머: exerciseStartAt 기준 경과 시간
+      if (exerciseStartAtRef.current === 0) {
+        exerciseStartAtRef.current = Date.now() - timer * 1000;
+      }
       timerRef.current = setInterval(() => {
-        setTimer((prev) => prev + 1);
-      }, 1000);
+        setTimer(Math.floor((Date.now() - exerciseStartAtRef.current) / 1000));
+      }, 500);
     }
+
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isTimerRunning, phase]);
+
+  // AppState 변경 감지: 앱 복귀 시 타이머 즉시 동기화
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && isTimerRunning) {
+        if (phase === 'rest' && restEndAtRef.current > 0) {
+          const remaining = Math.ceil((restEndAtRef.current - Date.now()) / 1000);
+          if (remaining <= 0) {
+            restEndAtRef.current = 0;
+            setIsTimerRunning(false);
+            setRestTime(0);
+            setPhase('exercise');
+            vibrate(500);
+            playCountAudio(PHRASE_SOUND_SOURCES.go);
+          } else {
+            setRestTime(remaining);
+          }
+        } else if (phase === 'exercise' && exerciseStartAtRef.current > 0) {
+          setTimer(Math.floor((Date.now() - exerciseStartAtRef.current) / 1000));
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [isTimerRunning, phase]);
+
+  // 음성 전용 모드: 운동 종목 전환 시 종목명 TTS 읽기
+  // currentExIndex 또는 phase 변경 시 (rest→exercise) 종목명 발화
+  useEffect(() => {
+    if (phase !== 'exercise') return;
+    if (!voiceOnlyMode) return;
+    if (!plan) return;
+    const exName = plan.exercises[currentExIndex]?.exercise?.name;
+    if (!exName) return;
+    // go 사운드 재생 후 600ms 뒤에 종목명 발화
+    const t = setTimeout(() => speak(exName), 600);
+    return () => clearTimeout(t);
+  }, [currentExIndex, phase, voiceOnlyMode]);
+
+  // 음성 전용 모드: 화면 켜짐 방지 해제 (화면이 자동으로 꺼져 배터리 절약)
+  useEffect(() => {
+    if (voiceOnlyMode) {
+      try {
+        // deactivateKeepAwake가 있으면 호출 (expo-keep-awake 프로그래매틱 API)
+        const kaw = require('expo-keep-awake');
+        kaw.deactivateKeepAwake?.();
+      } catch (e) {}
+    } else {
+      try {
+        const kaw = require('expo-keep-awake');
+        kaw.activateKeepAwakeAsync?.().catch(() => {});
+      } catch (e) {}
+    }
+  }, [voiceOnlyMode]);
 
   if (!plan || !profile) {
     return (
@@ -567,6 +886,8 @@ function WorkoutScreenInner() {
 
   const handleStartWorkout = () => {
     if (!plan || plan.exercises.length === 0) return;
+    exerciseStartAtRef.current = Date.now(); // 운동 시작 기준 시각
+    restEndAtRef.current = 0;
     setPhase('exercise');
     setCurrentExIndex(0);
     setCurrentSet(0);
@@ -575,12 +896,7 @@ function WorkoutScreenInner() {
     setAutoCountActive(false);
     setIsTimerRunning(true);
     if (voiceEnabled) {
-      try {
-        const ex = plan.exercises[0].exercise;
-        speak(`운동을 시작합니다. 첫 번째, ${ex.name}. ${ex.voiceCoaching?.[0] || '화이팅!'}`);
-      } catch (e) {
-        // Silently fail
-      }
+      playCountAudio(PHRASE_SOUND_SOURCES.start);
     }
   };
 
@@ -596,6 +912,7 @@ function WorkoutScreenInner() {
     if (currentSet < currentPlanItem.setDetails.length - 1) {
       // More sets remaining - start rest
       const nextSet = currentSet + 1;
+      restEndAtRef.current = 0; // 리셋 → phase 전환 후 새로 계산
       setCurrentSet(nextSet);
       setRepCount(0);
       setRestTime(currentPlanItem.restSeconds);
@@ -603,12 +920,14 @@ function WorkoutScreenInner() {
       setIsTimerRunning(true);
       showInterstitialIfReady(); // 휴식시간 광고
       if (voiceEnabled) {
-        speak(`${currentSet + 1}세트 완료! 잠시 쉬세요.`);
+        playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
+        setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
       }
     } else if (currentExIndex < totalExercises - 1) {
       // Next exercise
       const nextIdx = currentExIndex + 1;
       const nextEx = plan.exercises[nextIdx].exercise;
+      restEndAtRef.current = 0;
       setCurrentExIndex(nextIdx);
       setCurrentSet(0);
       setRepCount(0);
@@ -617,7 +936,12 @@ function WorkoutScreenInner() {
       setIsTimerRunning(true);
       showInterstitialIfReady(); // 운동 간 휴식시간 광고
       if (voiceEnabled) {
-        speak(`${currentPlanItem.exercise.name} 완료! 다음은 ${nextEx.name}입니다.`);
+        playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
+        setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
+      }
+      // 음성 전용 모드: 휴식 중 다음 운동 종목명 안내
+      if (voiceOnlyMode) {
+        setTimeout(() => speak(`다음 운동: ${nextEx.name}`), 1800);
       }
     } else {
       handleWorkoutComplete();
@@ -626,15 +950,14 @@ function WorkoutScreenInner() {
 
   const handleSkipRest = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    restEndAtRef.current = 0;
     setIsTimerRunning(false);
     setRestTime(0);
     setRepCount(0);
     setPhase('exercise');
     setIsTimerRunning(true);
     if (voiceEnabled) {
-      const ex = plan.exercises[currentExIndex].exercise;
-      const coaching = ex.voiceCoaching[currentSet % ex.voiceCoaching.length];
-      speak(coaching || '준비됐죠? 가보자!');
+      playCountAudio(PHRASE_SOUND_SOURCES.go);
     }
   };
 
@@ -655,7 +978,7 @@ function WorkoutScreenInner() {
     });
 
     if (voiceEnabled) {
-      speak('운동 완료! 오늘도 해냈습니다. 정말 대단해요!');
+      playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
     }
     vibrate([0, 200, 100, 200, 100, 400]);
   };
@@ -770,6 +1093,34 @@ function WorkoutScreenInner() {
             </View>
           </View>
 
+          {/* A/B/C 분할 루틴 선택 */}
+          <View style={styles.splitSelectorRow}>
+            <Text style={styles.splitSelectorLabel}>분할 루틴</Text>
+            <View style={styles.splitChips}>
+              {(['A', 'B', 'C'] as const).map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.splitChip, activeSplit === s && styles.splitChipActive]}
+                  onPress={() => handleSelectSplit(s)}
+                >
+                  <Text style={styles.splitChipEmoji}>{SPLITS[s].emoji}</Text>
+                  <Text style={[styles.splitChipLabel, activeSplit === s && styles.splitChipLabelActive]}>
+                    {SPLITS[s].label}
+                  </Text>
+                  <Text style={styles.splitChipDesc}>{SPLITS[s].desc}</Text>
+                </TouchableOpacity>
+              ))}
+              {activeSplit && (
+                <TouchableOpacity
+                  style={styles.splitChipReset}
+                  onPress={() => setActiveSplit(null)}
+                >
+                  <Text style={styles.splitChipResetText}>초기화</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
           {plan.exercises.map((item, exIdx) => {
             const isWeighted = item.exercise.equipment !== 'bodyweight';
             return (
@@ -861,6 +1212,54 @@ function WorkoutScreenInner() {
             );
           })}
 
+          {/* + 운동 추가 버튼 */}
+          <TouchableOpacity style={styles.addExerciseBtn} onPress={() => setShowAddExercise(true)}>
+            <Text style={styles.addExerciseBtnText}>+ 운동 추가</Text>
+          </TouchableOpacity>
+
+          {/* 쿨다운 섹션 */}
+          <View style={styles.cooldownSection}>
+            <Text style={styles.cooldownTitle}>🧘 쿨다운 스트레칭</Text>
+            <Text style={styles.cooldownSub}>운동 후 필수 · 약 5분</Text>
+            {[
+              { name: '폼롤러 흉추 마사지', time: '60초' },
+              { name: '고관절 굴근 스트레칭', time: '30초 × 좌우' },
+              { name: '어깨 후면 스트레칭', time: '30초 × 좌우' },
+              { name: '햄스트링 스트레칭', time: '30초 × 좌우' },
+            ].map((item, i) => (
+              <View key={i} style={styles.cooldownItem}>
+                <View style={styles.cooldownNum}><Text style={styles.cooldownNumText}>{i + 1}</Text></View>
+                <Text style={styles.cooldownName}>{item.name}</Text>
+                <Text style={styles.cooldownTime}>{item.time}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* 음성 전용 모드 토글 */}
+          <TouchableOpacity
+            style={[styles.voiceOnlyToggle, voiceOnlyMode && styles.voiceOnlyToggleActive]}
+            onPress={() => {
+              const next = !voiceOnlyMode;
+              setVoiceOnlyMode(next);
+              if (next) setVoiceEnabled(true); // 음성 전용 활성화 시 음성도 자동 ON
+            }}
+          >
+            <Text style={styles.voiceOnlyToggleIcon}>{voiceOnlyMode ? '🎧' : '🔇'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.voiceOnlyToggleTitle}>
+                {voiceOnlyMode ? '음성 전용 모드 ON' : '음성 전용 모드 OFF'}
+              </Text>
+              <Text style={styles.voiceOnlyToggleDesc}>
+                {voiceOnlyMode
+                  ? '화면 꺼짐 허용 · 종목명 자동 읽기'
+                  : '켜면 화면이 꺼져도 운동 안내 음성이 나옵니다'}
+              </Text>
+            </View>
+            <View style={[styles.voiceOnlyToggleSwitch, voiceOnlyMode && styles.voiceOnlyToggleSwitchOn]}>
+              <View style={[styles.voiceOnlyToggleThumb, voiceOnlyMode && styles.voiceOnlyToggleThumbOn]} />
+            </View>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.startBtn} onPress={handleStartWorkout}>
             <Text style={styles.startBtnText}>운동 시작 🚀</Text>
           </TouchableOpacity>
@@ -905,6 +1304,54 @@ function WorkoutScreenInner() {
             </View>
           </View>
         </Modal>
+
+        {/* 운동 추가 모달 */}
+        <Modal visible={showAddExercise} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>운동 추가</Text>
+                <TouchableOpacity onPress={() => { setShowAddExercise(false); setAddSearchQuery(''); }}>
+                  <Text style={styles.modalClose}>닫기</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={styles.addSearchInput}
+                placeholder="운동 이름 검색..."
+                placeholderTextColor={Colors.textMuted}
+                value={addSearchQuery}
+                onChangeText={setAddSearchQuery}
+              />
+              {(() => {
+                const currentIds = plan?.exercises.map((e) => e.exercise.id) ?? [];
+                const filtered = (allExercises ?? []).filter((e: any) =>
+                  !currentIds.includes(e.id) &&
+                  (addSearchQuery === '' || e.name.toLowerCase().includes(addSearchQuery.toLowerCase()))
+                );
+                return filtered.length === 0 ? (
+                  <Text style={styles.modalEmpty}>검색 결과가 없습니다</Text>
+                ) : (
+                  <FlatList
+                    data={filtered}
+                    keyExtractor={(item: any) => item.id}
+                    renderItem={({ item }: { item: any }) => (
+                      <TouchableOpacity style={styles.swapItem} onPress={() => handleAddExercise(item)}>
+                        <Text style={styles.swapEmoji}>{BODY_PART_EMOJI[item.bodyPart as keyof typeof BODY_PART_EMOJI]}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.swapName}>{item.name}</Text>
+                          <Text style={styles.swapDetail}>
+                            {BODY_PART_LABELS[item.bodyPart as keyof typeof BODY_PART_LABELS]} | {item.equipment === 'bodyweight' ? '맨몸' : item.equipment} | {item.defaultSets}세트 x {item.defaultReps}
+                          </Text>
+                        </View>
+                        <Text style={{ color: Colors.primary, fontSize: 20, fontWeight: '700' }}>+</Text>
+                      </TouchableOpacity>
+                    )}
+                  />
+                );
+              })()}
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -916,14 +1363,59 @@ function WorkoutScreenInner() {
     const isWeighted = ex.equipment !== 'bodyweight';
 
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { position: 'relative' }]}>
+        {/* 잠금 화면 오버레이 — voiceOnlyMode 활성 시 표시 */}
+        {voiceOnlyMode && (
+          <WorkoutLockScreen
+            startTimestamp={startTime}
+            exerciseName={ex.name}
+            progress={`${currentExIndex + 1} / ${totalExercises}`}
+            restTime={restTime}
+            phase={phase}
+            onUnlock={() => setVoiceOnlyMode(false)}
+            onPrev={() => {
+              if (currentExIndex > 0) {
+                restEndAtRef.current = 0;
+                exerciseStartAtRef.current = Date.now();
+                setCurrentExIndex(currentExIndex - 1);
+                setCurrentSet(0);
+                setTimer(0);
+                setRepCount(0);
+              }
+            }}
+            onNext={() => {
+              if (currentExIndex < totalExercises - 1) {
+                restEndAtRef.current = 0;
+                exerciseStartAtRef.current = Date.now();
+                setCurrentExIndex(currentExIndex + 1);
+                setCurrentSet(0);
+                setTimer(0);
+                setRepCount(0);
+              } else {
+                handleWorkoutComplete();
+              }
+            }}
+          />
+        )}
         <View style={styles.exercisePhase}>
           {/* Top bar */}
           <View style={styles.topBar}>
-            <TouchableOpacity onPress={() => setPhase('preview')}>
+            <TouchableOpacity onPress={confirmExit}>
               <Text style={styles.backButton}>←</Text>
             </TouchableOpacity>
+            <Text style={styles.topBarProgress}>{currentExIndex + 1} / {totalExercises}</Text>
             <Text style={styles.timerText}>{formatTime(timer)}</Text>
+            {/* 잠금 아이콘 버튼 (음성 전용 잠금모드) */}
+            <TouchableOpacity
+              style={[styles.lockBtn, voiceOnlyMode && styles.lockBtnActive]}
+              onPress={() => {
+                const next = !voiceOnlyMode;
+                setVoiceOnlyMode(next);
+                if (next) setVoiceEnabled(true);
+              }}
+            >
+              <Text style={styles.lockBtnText}>{voiceOnlyMode ? '🔒' : '🔓'}</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Progress */}
@@ -952,169 +1444,203 @@ function WorkoutScreenInner() {
             </TouchableOpacity>
           </View>
 
-          {/* Exercise tip / guide card */}
-          {showGuide ? (
-            <View style={styles.guideCard}>
-              <Text style={styles.guideTitle}>운동 가이드</Text>
-              {ex.guide.map((step, i) => (
-                <View key={i} style={styles.guideStep}>
-                  <Text style={styles.guideStepNum}>{i + 1}</Text>
-                  <Text style={styles.guideStepText}>{step}</Text>
+          {/* Scrollable content: tip/guide, media, info, auto counter, set list */}
+          <ScrollView style={[styles.setListScroll, { marginTop: 0 }]} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Spacing.sm }}>
+            {/* Exercise tip / guide card */}
+            {showGuide ? (
+              <View style={styles.guideCard}>
+                <Text style={styles.guideTitle}>운동 가이드</Text>
+                {ex.guide.map((step, i) => (
+                  <View key={i} style={styles.guideStep}>
+                    <Text style={styles.guideStepNum}>{i + 1}</Text>
+                    <Text style={styles.guideStepText}>{step}</Text>
+                  </View>
+                ))}
+                {ex.warnings.length > 0 && (
+                  <View style={styles.warningBox}>
+                    <Text style={styles.warningTitle}>⚠️ 주의사항</Text>
+                    {ex.warnings.map((w, i) => (
+                      <Text key={i} style={styles.warningText}>• {w}</Text>
+                    ))}
+                  </View>
+                )}
+                {ex.tips.length > 0 && (
+                  <View style={styles.tipsBox}>
+                    <Text style={styles.tipsTitle}>💡 팁</Text>
+                    {ex.tips.map((t, i) => (
+                      <Text key={i} style={styles.tipsText}>• {t}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.tipCard}>
+                <Text style={styles.tipCardText}>
+                  {ex.tips[0] || ex.guide[0]}
+                </Text>
+              </View>
+            )}
+
+            {/* Exercise Media (ExerciseDB video or image or placeholder) */}
+            {exerciseMedia === null ? (
+              <View style={[styles.exerciseMediaCard, styles.exerciseMediaPlaceholder]}>
+                <ActivityIndicator color={Colors.primary} />
+              </View>
+            ) : exerciseMedia.videoUrl && Video ? (
+              <View style={styles.exerciseMediaCard}>
+                <Video
+                  source={{ uri: exerciseMedia.videoUrl }}
+                  style={styles.exerciseMediaImage}
+                  resizeMode={ResizeMode?.COVER ?? 'cover'}
+                  shouldPlay
+                  isLooping
+                  isMuted
+                  useNativeControls={false}
+                />
+              </View>
+            ) : exerciseMedia.imageUrl ? (
+              <View style={styles.exerciseMediaCard}>
+                <Image
+                  source={{ uri: exerciseMedia.imageUrl }}
+                  style={styles.exerciseMediaImage}
+                  resizeMode="cover"
+                />
+              </View>
+            ) : (
+              <View style={[styles.exerciseMediaCard, styles.exerciseMediaPlaceholder]}>
+                <Text style={{ fontSize: 52 }}>{BODY_PART_EMOJI[ex.bodyPart]}</Text>
+              </View>
+            )}
+
+            {/* Exercise Info */}
+            <Text style={styles.exPhaseTitle}>{ex.name}</Text>
+            <Text style={styles.exPhaseSubtitle}>
+              {BODY_PART_EMOJI[ex.bodyPart]} {BODY_PART_LABELS[ex.bodyPart]}
+              {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
+            </Text>
+
+            {/* Auto Voice Counter - background audio supported */}
+            {voiceEnabled && !sd.reps.includes('초') && (
+              <View style={styles.autoCounterContainer}>
+                {/* Count display */}
+                <View style={styles.repCounterBtn}>
+                  <Text style={styles.repCounterNumber}>{repCount}</Text>
+                  <Text style={styles.repCounterLabel}>/ {sd.reps}회</Text>
                 </View>
-              ))}
-              {ex.warnings.length > 0 && (
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningTitle}>⚠️ 주의사항</Text>
-                  {ex.warnings.map((w, i) => (
-                    <Text key={i} style={styles.warningText}>• {w}</Text>
+
+                {/* Control buttons */}
+                <View style={styles.autoCountControls}>
+                  {!autoCountActive ? (
+                    <TouchableOpacity
+                      style={styles.autoCountStartBtn}
+                      onPress={() => {
+                        setRepCount(0);
+                        setAutoCountActive(true);
+                      }}
+                    >
+                      <Text style={styles.autoCountStartText}>
+                        {repCount > 0 ? '다시 시작' : '자동 카운트 시작'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.autoCountStopBtn}
+                      onPress={() => setAutoCountActive(false)}
+                    >
+                      <Text style={styles.autoCountStopText}>일시정지</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Speed control */}
+                <View style={styles.speedRow}>
+                  <Text style={styles.speedLabel}>속도:</Text>
+                  {[2, 3, 4, 5].map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[styles.speedBtn, countSpeed === s && styles.speedBtnActive]}
+                      onPress={() => setCountSpeed(s)}
+                    >
+                      <Text style={[styles.speedBtnText, countSpeed === s && styles.speedBtnTextActive]}>
+                        {s}초
+                      </Text>
+                    </TouchableOpacity>
                   ))}
                 </View>
-              )}
-              {ex.tips.length > 0 && (
-                <View style={styles.tipsBox}>
-                  <Text style={styles.tipsTitle}>💡 팁</Text>
-                  {ex.tips.map((t, i) => (
-                    <Text key={i} style={styles.tipsText}>• {t}</Text>
-                  ))}
-                </View>
-              )}
+              </View>
+            )}
+
+            {/* Set Details (PlanFit style) */}
+            <View style={{ marginTop: Spacing.lg }}>
+              {currentPlanItem.setDetails.map((s, idx) => {
+                const isCurrent = idx === currentSet;
+                const isDone = s.completed;
+                return (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.exSetRow,
+                      isCurrent && styles.exSetRowCurrent,
+                      isDone && styles.exSetRowDone,
+                    ]}
+                  >
+                    <Text style={[styles.exSetLabel, isCurrent && styles.exSetLabelCurrent]}>
+                      {isDone ? '✓' : `${idx + 1}세트`}
+                    </Text>
+
+                    {isWeighted && (
+                      <>
+                        <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
+                          {s.weight}
+                        </Text>
+                        <Text style={styles.exSetUnit}>kg</Text>
+                        <Text style={styles.exSetDivider}>/</Text>
+                      </>
+                    )}
+
+                    <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
+                      {s.reps}
+                    </Text>
+                    <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '' : '회'}</Text>
+                  </View>
+                );
+              })}
             </View>
-          ) : (
-            <View style={styles.tipCard}>
-              <Text style={styles.tipCardText}>
-                {ex.tips[0] || ex.guide[0]}
+          </ScrollView>
+
+          {/* 다음 운동 미리보기 카드 */}
+          {currentExIndex < totalExercises - 1 && (
+            <View style={styles.nextExCard}>
+              <View style={styles.nextExCardInner}>
+                <Text style={styles.nextExLabel}>다음 운동</Text>
+                <Text style={styles.nextExName}>{plan.exercises[currentExIndex + 1].exercise.name}</Text>
+              </View>
+              <Text style={styles.nextExEmoji}>
+                {BODY_PART_EMOJI[plan.exercises[currentExIndex + 1].exercise.bodyPart]}
               </Text>
             </View>
           )}
 
-          {/* Exercise Media (ExerciseDB video or image) */}
-          {exerciseMedia?.videoUrl && Video ? (
-            <View style={styles.exerciseMediaCard}>
-              <Video
-                source={{ uri: exerciseMedia.videoUrl }}
-                style={styles.exerciseMediaImage}
-                resizeMode={ResizeMode?.COVER ?? 'cover'}
-                shouldPlay
-                isLooping
-                isMuted
-                useNativeControls={false}
-              />
-            </View>
-          ) : exerciseMedia?.imageUrl ? (
-            <View style={styles.exerciseMediaCard}>
-              <Image
-                source={{ uri: exerciseMedia.imageUrl }}
-                style={styles.exerciseMediaImage}
-                resizeMode="cover"
-              />
-            </View>
-          ) : null}
-
-          {/* Exercise Info */}
-          <Text style={styles.exPhaseTitle}>{ex.name}</Text>
-          <Text style={styles.exPhaseSubtitle}>
-            {BODY_PART_EMOJI[ex.bodyPart]} {BODY_PART_LABELS[ex.bodyPart]}
-            {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
-          </Text>
-
-          {/* Auto Voice Counter - background audio supported */}
-          {voiceEnabled && !sd.reps.includes('초') && (
-            <View style={styles.autoCounterContainer}>
-              {/* Count display */}
-              <View style={styles.repCounterBtn}>
-                <Text style={styles.repCounterNumber}>{repCount}</Text>
-                <Text style={styles.repCounterLabel}>/ {sd.reps}회</Text>
-              </View>
-
-              {/* Control buttons */}
-              <View style={styles.autoCountControls}>
-                {!autoCountActive ? (
-                  <TouchableOpacity
-                    style={styles.autoCountStartBtn}
-                    onPress={() => {
-                      setRepCount(0);
-                      setAutoCountActive(true);
-                    }}
-                  >
-                    <Text style={styles.autoCountStartText}>
-                      {repCount > 0 ? '다시 시작' : '자동 카운트 시작'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.autoCountStopBtn}
-                    onPress={() => setAutoCountActive(false)}
-                  >
-                    <Text style={styles.autoCountStopText}>일시정지</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Speed control */}
-              <View style={styles.speedRow}>
-                <Text style={styles.speedLabel}>속도:</Text>
-                {[2, 3, 4, 5].map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={[styles.speedBtn, countSpeed === s && styles.speedBtnActive]}
-                    onPress={() => setCountSpeed(s)}
-                  >
-                    <Text style={[styles.speedBtnText, countSpeed === s && styles.speedBtnTextActive]}>
-                      {s}초
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Set Details (PlanFit style) */}
-          <ScrollView style={styles.setListScroll} showsVerticalScrollIndicator={false}>
-            {currentPlanItem.setDetails.map((s, idx) => {
-              const isCurrent = idx === currentSet;
-              const isDone = s.completed;
-              return (
-                <View
-                  key={idx}
-                  style={[
-                    styles.exSetRow,
-                    isCurrent && styles.exSetRowCurrent,
-                    isDone && styles.exSetRowDone,
-                  ]}
-                >
-                  <Text style={[styles.exSetLabel, isCurrent && styles.exSetLabelCurrent]}>
-                    {isDone ? '✓' : `${idx + 1}세트`}
-                  </Text>
-
-                  {isWeighted && (
-                    <>
-                      <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
-                        {s.weight}
-                      </Text>
-                      <Text style={styles.exSetUnit}>kg</Text>
-                      <Text style={styles.exSetDivider}>/</Text>
-                    </>
-                  )}
-
-                  <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
-                    {s.reps}
-                  </Text>
-                  <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '' : '회'}</Text>
-                </View>
-              );
-            })}
-          </ScrollView>
-
-          {/* Bottom buttons */}
+          {/* Bottom: 세트 완료 + 하단 네비게이션 */}
           <View style={styles.bottomBtns}>
-            <TouchableOpacity style={styles.restTimerBtn} onPress={() => {
-              setRestTime(currentPlanItem.restSeconds);
-              setPhase('rest');
-              setIsTimerRunning(true);
-            }}>
-              <Text style={styles.restTimerBtnText}>휴식 타이머</Text>
+            {/* 이전 운동으로 */}
+            <TouchableOpacity
+              style={styles.navBtn}
+              onPress={() => {
+                if (currentExIndex > 0) {
+                  restEndAtRef.current = 0;
+                  exerciseStartAtRef.current = Date.now();
+                  setCurrentExIndex(currentExIndex - 1);
+                  setCurrentSet(0);
+                  setTimer(0);
+                  setRepCount(0);
+                }
+              }}
+            >
+              <Text style={styles.navBtnText}>⏮</Text>
             </TouchableOpacity>
 
+            {/* 세트 완료 (메인 버튼) */}
             <TouchableOpacity style={styles.setCompleteBtn} onPress={handleSetComplete}>
               <Text style={styles.setCompleteBtnText}>
                 {currentSet < currentPlanItem.setDetails.length - 1
@@ -1123,6 +1649,25 @@ function WorkoutScreenInner() {
                     ? '다음 운동 →'
                     : '운동 완료! 🎉'}
               </Text>
+            </TouchableOpacity>
+
+            {/* 다음 운동으로 건너뛰기 */}
+            <TouchableOpacity
+              style={styles.navBtn}
+              onPress={() => {
+                if (currentExIndex < totalExercises - 1) {
+                  restEndAtRef.current = 0;
+                  exerciseStartAtRef.current = Date.now();
+                  setCurrentExIndex(currentExIndex + 1);
+                  setCurrentSet(0);
+                  setTimer(0);
+                  setRepCount(0);
+                } else {
+                  handleWorkoutComplete();
+                }
+              }}
+            >
+              <Text style={styles.navBtnText}>⏭</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1137,8 +1682,34 @@ function WorkoutScreenInner() {
       : null;
 
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { position: 'relative' }]}>
+        {/* 휴식 중 잠금 오버레이 */}
+        {voiceOnlyMode && (
+          <WorkoutLockScreen
+            startTimestamp={startTime}
+            exerciseName={nextEx?.exercise.name ?? ''}
+            progress={`${currentExIndex + 1} / ${totalExercises}`}
+            restTime={restTime}
+            phase="rest"
+            onUnlock={() => setVoiceOnlyMode(false)}
+            onPrev={() => {
+              if (currentExIndex > 0) {
+                restEndAtRef.current = 0;
+                exerciseStartAtRef.current = Date.now();
+                setCurrentExIndex(currentExIndex - 1);
+                setCurrentSet(0);
+                setTimer(0);
+                setRepCount(0);
+                setPhase('exercise');
+              }
+            }}
+            onNext={handleSkipRest}
+          />
+        )}
         <View style={styles.restContainer}>
+          <TouchableOpacity onPress={confirmExit} style={{ position: 'absolute', top: 0, left: Spacing.lg }}>
+            <Text style={styles.backButton}>←</Text>
+          </TouchableOpacity>
           <Text style={styles.restLabel}>휴식 시간</Text>
           <Text style={styles.restTimer}>{formatTime(restTime)}</Text>
           <Text style={styles.restHint}>다음: {nextEx?.exercise.name}</Text>
@@ -1397,6 +1968,95 @@ const styles = StyleSheet.create({
   },
   removeBtnText: { color: Colors.accent, fontSize: FontSize.sm, fontWeight: '700' },
 
+  // A/B/C 분할 루틴 선택
+  splitSelectorRow: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+  },
+  splitSelectorLabel: {
+    color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.sm,
+  },
+  splitChips: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
+  splitChip: {
+    flex: 1, minWidth: 80, backgroundColor: Colors.card,
+    borderRadius: BorderRadius.md, padding: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.cardBorder,
+    alignItems: 'center',
+  },
+  splitChipActive: { borderColor: Colors.primary, backgroundColor: 'rgba(78,238,176,0.1)' },
+  splitChipEmoji: { fontSize: 20, marginBottom: 2 },
+  splitChipLabel: { color: Colors.textSecondary, fontSize: FontSize.xs, fontWeight: '700' },
+  splitChipLabelActive: { color: Colors.primary },
+  splitChipDesc: { color: Colors.textMuted, fontSize: 10, marginTop: 1 },
+  splitChipReset: {
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs,
+    alignSelf: 'center',
+  },
+  splitChipResetText: { color: Colors.textMuted, fontSize: FontSize.xs },
+
+  // + 운동 추가 버튼
+  addExerciseBtn: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    borderWidth: 1, borderColor: Colors.primary, borderStyle: 'dashed',
+    borderRadius: BorderRadius.md, paddingVertical: Spacing.md,
+    alignItems: 'center',
+  },
+  addExerciseBtnText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
+
+  // 쿨다운 섹션
+  cooldownSection: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, borderWidth: 1, borderColor: Colors.cardBorder,
+  },
+  cooldownTitle: { color: Colors.text, fontSize: FontSize.md, fontWeight: '700' },
+  cooldownSub: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2, marginBottom: Spacing.sm },
+  cooldownItem: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  cooldownNum: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center',
+  },
+  cooldownNumText: { color: Colors.textSecondary, fontSize: FontSize.xs, fontWeight: '700' },
+  cooldownName: { flex: 1, color: Colors.text, fontSize: FontSize.sm },
+  cooldownTime: { color: Colors.textMuted, fontSize: FontSize.xs },
+
+  // 운동 추가 검색 입력
+  addSearchInput: {
+    backgroundColor: Colors.surface, color: Colors.text,
+    borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm, fontSize: FontSize.sm,
+    marginBottom: Spacing.sm,
+  },
+
+  // 음성 전용 모드 토글 (Preview 화면)
+  voiceOnlyToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
+    padding: Spacing.md, borderWidth: 1, borderColor: Colors.cardBorder,
+  },
+  voiceOnlyToggleActive: {
+    borderColor: Colors.primary, backgroundColor: 'rgba(78,238,176,0.08)',
+  },
+  voiceOnlyToggleIcon: { fontSize: 24 },
+  voiceOnlyToggleTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '700' },
+  voiceOnlyToggleDesc: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2 },
+  voiceOnlyToggleSwitch: {
+    width: 44, height: 24, borderRadius: 12, backgroundColor: Colors.surface,
+    justifyContent: 'center', paddingHorizontal: 2,
+  },
+  voiceOnlyToggleSwitchOn: { backgroundColor: Colors.primary },
+  voiceOnlyToggleThumb: {
+    width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.textMuted,
+  },
+  voiceOnlyToggleThumbOn: {
+    backgroundColor: Colors.background, marginLeft: 20,
+  },
+
   startBtn: {
     marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
     backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
@@ -1406,8 +2066,19 @@ const styles = StyleSheet.create({
 
   // ===== Exercise Phase =====
   exercisePhase: { flex: 1, padding: Spacing.lg },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  topBarProgress: { color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: '600', flex: 1 },
   timerText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
+  // 잠금 아이콘 버튼
+  lockBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  lockBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  lockBtnText: { fontSize: 18 },
   progressBarBg: {
     height: 4, backgroundColor: Colors.surface, borderRadius: 2, marginTop: Spacing.sm,
   },
@@ -1418,6 +2089,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md, backgroundColor: Colors.card,
   },
   exerciseMediaImage: { width: '100%', height: '100%' },
+  exerciseMediaPlaceholder: {
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.cardBorder,
+  },
 
   tipCard: {
     backgroundColor: Colors.card, borderRadius: BorderRadius.lg, padding: Spacing.lg,
@@ -1502,16 +2177,27 @@ const styles = StyleSheet.create({
   exSetUnit: { fontSize: FontSize.sm, color: Colors.textMuted },
   exSetDivider: { fontSize: FontSize.lg, color: Colors.textMuted, marginHorizontal: 4 },
 
+  // 다음 운동 미리보기 카드
+  nextExCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
+    padding: Spacing.sm, marginTop: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.cardBorder,
+  },
+  nextExCardInner: { flex: 1 },
+  nextExLabel: { color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: '600' },
+  nextExName: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '700', marginTop: 2 },
+  nextExEmoji: { fontSize: 28, marginLeft: Spacing.sm },
+
   // Bottom buttons
   bottomBtns: {
-    flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md,
+    flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm, alignItems: 'center',
   },
-  restTimerBtn: {
-    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg,
-    borderWidth: 1, borderColor: Colors.primary,
+  navBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center',
   },
-  restTimerBtnText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '600' },
+  navBtnText: { fontSize: 20 },
   setCompleteBtn: {
     flex: 1, backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
     paddingVertical: Spacing.md, alignItems: 'center',

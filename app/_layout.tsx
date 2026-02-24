@@ -5,11 +5,18 @@ import { View, ActivityIndicator } from 'react-native';
 import { Colors } from '../constants/theme';
 import { useStore } from '../store/useStore';
 
+let mobileAds: any = null;
+try {
+  mobileAds = require('react-native-google-mobile-ads').default;
+} catch (e) {}
+
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const loadFromStorage = useStore((s) => s.loadFromStorage);
 
   useEffect(() => {
+    // AdMob SDK 초기화 (광고 로드 전에 반드시 필요)
+    mobileAds?.().initialize().catch(() => {});
     loadFromStorage().then(() => setReady(true));
   }, []);
 

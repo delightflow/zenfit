@@ -60,15 +60,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "64aaaff2-c370-4f73-9d63-d9807755ac78"
+        "projectId": "85c9e625-34ce-4702-a9ad-599b7d60b599"
       }
     },
-    "owner": "seungyeoljeon",
+    "owner": "jsy6187",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/64aaaff2-c370-4f73-9d63-d9807755ac78"
+      "url": "https://u.expo.dev/85c9e625-34ce-4702-a9ad-599b7d60b599"
     }
   }
 }
