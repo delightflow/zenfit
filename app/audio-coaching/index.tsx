@@ -117,6 +117,7 @@ export default function AudioCoachingScreen() {
   const elapsedRef = useRef(0);
   const startedAtRef = useRef(0);
   const activeSoundRef = useRef<any>(null);
+  const silentSoundRef = useRef<any>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef(false);
@@ -257,11 +258,41 @@ export default function AudioCoachingScreen() {
     });
   };
 
+  const startSilentLoop = async () => {
+    try {
+      if (!Audio?.Sound || silentSoundRef.current) return;
+      // Play a real audio at near-zero volume to keep Android foreground service alive
+      const { sound } = await Audio.Sound.createAsync(
+        COUNT_SOUND_SOURCES[1],
+        { isLooping: true, volume: 0.001 }
+      );
+      silentSoundRef.current = sound;
+      await sound.playAsync();
+      console.log('[AudioCoaching] Background silent loop started');
+    } catch (e) {
+      console.log('[AudioCoaching] Background loop error:', e);
+    }
+  };
+
+  const stopSilentLoop = async () => {
+    try {
+      if (silentSoundRef.current) {
+        await silentSoundRef.current.stopAsync();
+        await silentSoundRef.current.unloadAsync();
+        silentSoundRef.current = null;
+        console.log('[AudioCoaching] Background silent loop stopped');
+      }
+    } catch {}
+  };
+
   const playFromIndex = async (startIdx: number) => {
     if (!timeline) return;
     abortRef.current = false;
     playingRef.current = true;
     setIsPlaying(true);
+
+    // Start background silent loop to keep audio session alive
+    await startSilentLoop();
 
     for (let i = startIdx; i < timeline.events.length; i++) {
       if (abortRef.current || !playingRef.current) break;
@@ -297,6 +328,7 @@ export default function AudioCoachingScreen() {
     }
 
     // Playback complete
+    await stopSilentLoop();
     if (!abortRef.current) {
       playingRef.current = false;
       setIsPlaying(false);
@@ -336,6 +368,7 @@ export default function AudioCoachingScreen() {
       activeSoundRef.current.unloadAsync().catch(() => {});
       activeSoundRef.current = null;
     }
+    stopSilentLoop();
     try { Speech?.stop(); } catch {}
   };
 
