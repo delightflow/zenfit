@@ -1435,6 +1435,17 @@ function WorkoutScreenInner() {
             <Text style={styles.startBtnText}>운동 시작 🚀</Text>
           </TouchableOpacity>
 
+          {/* 오디오 코칭 모드: 전체 운동을 연속 오디오로 재생 (잠금화면 지원) */}
+          <TouchableOpacity
+            style={[styles.startBtn, { backgroundColor: '#242424', marginTop: Spacing.sm, borderWidth: 1, borderColor: Colors.primary }]}
+            onPress={() => router.push('/audio-coaching')}
+          >
+            <Text style={[styles.startBtnText, { color: Colors.primary }]}>🎧 오디오 코칭 모드</Text>
+          </TouchableOpacity>
+          <Text style={{ color: Colors.textMuted, fontSize: FontSize.xs, textAlign: 'center', marginTop: Spacing.xs, marginHorizontal: Spacing.lg }}>
+            실제 코치처럼 종목·카운트·쉬는시간을 자동 안내합니다. 잠금화면에서도 재생!
+          </Text>
+
           <View style={{ height: Spacing.xxl }} />
         </ScrollView>
 

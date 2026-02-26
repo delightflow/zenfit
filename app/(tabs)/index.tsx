@@ -122,6 +122,15 @@ function TodayWorkout() {
           {todayCompleted ? '✅ 오늘 운동 완료!' : '🚀 운동 시작하기'}
         </Text>
       </TouchableOpacity>
+
+      {!todayCompleted && (
+        <TouchableOpacity
+          style={styles.audioCoachBtn}
+          onPress={() => router.push('/audio-coaching')}
+        >
+          <Text style={styles.audioCoachBtnText}>🎧 오디오 코칭 모드</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -348,5 +357,19 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.background,
+  },
+  audioCoachBtn: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm + 2,
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  audioCoachBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.primary,
   },
 });
