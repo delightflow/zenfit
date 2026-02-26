@@ -58,6 +58,18 @@ interface AppState {
   updateBodyPhoto: (id: string, updates: Partial<BodyPhoto>) => void;
   removeBodyPhoto: (id: string) => void;
 
+  // Split routine tracking (A/B/C 분할 루틴)
+  lastSplit: string | null; // 마지막 완료한 분할 ('A' | 'B' | 'C')
+  lastSplitDate: string | null; // 마지막 분할 완료 날짜
+  splitPlans: Record<string, string[]>; // split -> exerciseId[] (분할별 고정 운동 목록)
+  exerciseWeights: Record<string, number>; // exerciseId -> 마지막 사용 무게(kg)
+  blacklistedExercises: string[]; // 추천하지 않기 운동 ID 목록
+
+  setLastSplit: (split: string) => void;
+  setSplitPlan: (split: string, exerciseIds: string[]) => void;
+  updateExerciseWeights: (weights: Record<string, number>) => void;
+  toggleBlacklist: (exerciseId: string) => void;
+
   // Actions
   completeToday: () => void;
   checkStreak: () => void;
@@ -99,6 +111,11 @@ export const useStore = create<AppState>((set, get) => ({
   todayCompleted: false,
   workoutLogs: [],
   bodyPhotos: [],
+  lastSplit: null,
+  lastSplitDate: null,
+  splitPlans: {},
+  exerciseWeights: {},
+  blacklistedExercises: [],
 
   addWorkoutLog: (log) => {
     set((state) => ({
@@ -125,6 +142,38 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       bodyPhotos: state.bodyPhotos.filter((p) => p.id !== id),
     }));
+    get().saveToStorage();
+  },
+
+  setLastSplit: (split) => {
+    set({ lastSplit: split, lastSplitDate: getToday() });
+    get().saveToStorage();
+  },
+
+  setSplitPlan: (split, exerciseIds) => {
+    set((state) => ({
+      splitPlans: { ...state.splitPlans, [split]: exerciseIds },
+    }));
+    get().saveToStorage();
+  },
+
+  updateExerciseWeights: (weights) => {
+    set((state) => ({
+      exerciseWeights: { ...state.exerciseWeights, ...weights },
+    }));
+    get().saveToStorage();
+  },
+
+  toggleBlacklist: (exerciseId) => {
+    set((state) => {
+      const list = state.blacklistedExercises;
+      const idx = list.indexOf(exerciseId);
+      return {
+        blacklistedExercises: idx >= 0
+          ? list.filter((id) => id !== exerciseId)
+          : [...list, exerciseId],
+      };
+    });
     get().saveToStorage();
   },
 
@@ -174,6 +223,11 @@ export const useStore = create<AppState>((set, get) => ({
           lastWorkoutDate: parsed.lastWorkoutDate ?? null,
           workoutLogs: parsed.workoutLogs ?? [],
           bodyPhotos: parsed.bodyPhotos ?? [],
+          lastSplit: parsed.lastSplit ?? null,
+          lastSplitDate: parsed.lastSplitDate ?? null,
+          splitPlans: parsed.splitPlans ?? {},
+          exerciseWeights: parsed.exerciseWeights ?? {},
+          blacklistedExercises: parsed.blacklistedExercises ?? [],
         });
         get().checkStreak();
       }
@@ -193,6 +247,11 @@ export const useStore = create<AppState>((set, get) => ({
         lastWorkoutDate: state.lastWorkoutDate,
         workoutLogs: state.workoutLogs,
         bodyPhotos: state.bodyPhotos,
+        lastSplit: state.lastSplit,
+        lastSplitDate: state.lastSplitDate,
+        splitPlans: state.splitPlans,
+        exerciseWeights: state.exerciseWeights,
+        blacklistedExercises: state.blacklistedExercises,
       });
       await AsyncStorage.setItem(STORAGE_KEY, data);
     } catch (e) {

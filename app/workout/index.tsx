@@ -33,15 +33,18 @@ try {
   MODULE_ERRORS.push(`store: ${e?.message}`);
 }
 
-let generateWorkoutPlan: any, getRecommendedParts: any, allExercises: any;
-let BODY_PART_LABELS: any, BODY_PART_EMOJI: any;
+let generateWorkoutPlan: any, generateSplitPlan: any, getRecommendedParts: any, getNextSplit: any, allExercises: any;
+let BODY_PART_LABELS: any, BODY_PART_EMOJI: any, SPLIT_DEFS: any;
 try {
   const data = require('../../data/exercises');
   generateWorkoutPlan = data.generateWorkoutPlan;
+  generateSplitPlan = data.generateSplitPlan;
   getRecommendedParts = data.getRecommendedParts;
+  getNextSplit = data.getNextSplit;
   allExercises = data.exercises;
   BODY_PART_LABELS = data.BODY_PART_LABELS;
   BODY_PART_EMOJI = data.BODY_PART_EMOJI;
+  SPLIT_DEFS = data.SPLIT_DEFS;
 } catch (e: any) {
   MODULE_ERRORS.push(`exercises: ${e?.message}`);
 }
@@ -376,6 +379,14 @@ function WorkoutScreenInner() {
   const profile = useStore((s: any) => s.profile);
   const completeToday = useStore((s: any) => s.completeToday);
   const addWorkoutLog = useStore((s: any) => s.addWorkoutLog);
+  const lastSplit = useStore((s: any) => s.lastSplit);
+  const splitPlans = useStore((s: any) => s.splitPlans);
+  const exerciseWeights = useStore((s: any) => s.exerciseWeights);
+  const blacklistedExercises = useStore((s: any) => s.blacklistedExercises);
+  const setLastSplit = useStore((s: any) => s.setLastSplit);
+  const setSplitPlanStore = useStore((s: any) => s.setSplitPlan);
+  const updateExerciseWeights = useStore((s: any) => s.updateExerciseWeights);
+  const toggleBlacklist = useStore((s: any) => s.toggleBlacklist);
 
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -392,7 +403,7 @@ function WorkoutScreenInner() {
   const [activeSplit, setActiveSplit] = useState<'A' | 'B' | 'C' | null>(null); // A/B/C 분할 루틴
   const [showAddExercise, setShowAddExercise] = useState(false); // 운동 추가 모달
   const [addSearchQuery, setAddSearchQuery] = useState(''); // 운동 추가 검색
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const voiceEnabled = false; // 음성 ON/OFF 제거 — 오디오 코칭으로 대체
   const [repCount, setRepCount] = useState(0); // Auto voice counting
   const [autoCountActive, setAutoCountActive] = useState(false); // Auto counting state
   const [countSpeed, setCountSpeed] = useState(3); // Seconds between counts
@@ -407,6 +418,7 @@ function WorkoutScreenInner() {
 
   // Audio coaching state
   const [coachingActive, setCoachingActive] = useState(false);
+  const [coachingPaused, setCoachingPaused] = useState(false);
   const [coachingTimeline, setCoachingTimeline] = useState<any>(null);
   const [coachingTimestamps, setCoachingTimestamps] = useState<number[]>([]);
   const [coachingEventIdx, setCoachingEventIdx] = useState(0);
@@ -424,24 +436,26 @@ function WorkoutScreenInner() {
   const interstitialRef = useRef<any>(null);
   const adReadyRef = useRef(false);
 
-  // A/B/C 분할 루틴 정의
-  const SPLITS = {
-    A: { label: 'A 분할', emoji: '🫁', desc: '가슴 · 삼두', parts: ['chest', 'arms'] },
-    B: { label: 'B 분할', emoji: '🔙', desc: '등 · 이두', parts: ['back', 'arms'] },
-    C: { label: 'C 분할', emoji: '🦵', desc: '하체 · 어깨', parts: ['legs', 'shoulder'] },
-  } as const;
+  // 분할 정의 (목표별)
+  const goalSplits = SPLIT_DEFS?.[profile?.goal || 'maintain'] || SPLIT_DEFS?.maintain || {};
 
-  // 분할 선택 시 플랜 재생성
+  // 분할 선택 시 결정적 플랜 생성 (저장된 운동 + 무게 사용)
   const handleSelectSplit = (split: 'A' | 'B' | 'C') => {
-    if (!profile) return;
+    if (!profile || !generateSplitPlan) return;
     try {
-      const splitParts = SPLITS[split].parts as any[];
       const goal = profile.goal || 'maintain';
       const experience = profile.experience || 'beginner';
-      const newPlan = generateWorkoutPlan(goal, experience, splitParts);
+      const savedIds = splitPlans?.[split];
+      const newPlan = generateSplitPlan(goal, experience, split, {
+        savedExerciseIds: savedIds,
+        savedWeights: exerciseWeights,
+        blacklist: blacklistedExercises,
+      });
       if (newPlan && newPlan.exercises.length > 0) {
         setPlan(newPlan);
         setActiveSplit(split);
+        // 운동 ID 목록 저장 (다음에도 같은 운동 사용)
+        setSplitPlanStore(split, newPlan.exercises.map((e: any) => e.exercise.id));
       }
     } catch (e) {
       console.log('[ZenFit] Split plan error:', e);
@@ -600,6 +614,7 @@ function WorkoutScreenInner() {
     setCoachingTimestamps(ts);
     setCoachingElapsed(0);
     setCoachingEventIdx(0);
+    setCoachingPaused(false);
 
     // Start workout
     exerciseStartAtRef.current = Date.now();
@@ -618,6 +633,7 @@ function WorkoutScreenInner() {
     coachingPlayingRef.current = false;
     coachingAbortRef.current = true;
     setCoachingActive(false);
+    setCoachingPaused(false);
     if (coachingTimeoutRef.current) { clearTimeout(coachingTimeoutRef.current); }
     if (coachingActiveSoundRef.current) {
       coachingActiveSoundRef.current.stopAsync().catch(() => {});
@@ -628,6 +644,60 @@ function WorkoutScreenInner() {
       silentSoundRef.current.setOnPlaybackStatusUpdate(null);
     }
     try { Speech?.stop(); } catch {}
+  };
+
+  const pauseCoaching = () => {
+    coachingPlayingRef.current = false;
+    coachingAbortRef.current = true;
+    setCoachingActive(false);
+    setCoachingPaused(true);
+    if (coachingTimeoutRef.current) { clearTimeout(coachingTimeoutRef.current); }
+    if (coachingActiveSoundRef.current) {
+      coachingActiveSoundRef.current.stopAsync().catch(() => {});
+      coachingActiveSoundRef.current.unloadAsync().catch(() => {});
+      coachingActiveSoundRef.current = null;
+    }
+    if (silentSoundRef.current) {
+      silentSoundRef.current.setOnPlaybackStatusUpdate(null);
+    }
+    try { Speech?.stop(); } catch {}
+  };
+
+  const resumeCoaching = () => {
+    if (!plan || !generateCoachingTimeline) return;
+    // 현재 plan 상태로 타임라인 재생성 (수동 편집 반영)
+    const timeline = generateCoachingTimeline(plan, { countSpeedSec: countSpeed });
+    const ts = getEventTimestamps(timeline.events);
+    setCoachingTimeline(timeline);
+    setCoachingTimestamps(ts);
+    setCoachingPaused(false);
+
+    // 현재 exerciseIndex + setIndex에 맞는 이벤트 찾기
+    let resumeIdx = 0;
+    for (let i = 0; i < timeline.events.length; i++) {
+      const ev = timeline.events[i];
+      if (ev.meta?.exerciseIndex === currentExIndex &&
+          ev.meta?.setIndex === currentSet &&
+          ev.meta?.phase === 'exercise') {
+        resumeIdx = i;
+        break;
+      }
+    }
+
+    // 정확한 세트를 못 찾으면 해당 운동의 전환 이벤트 찾기
+    if (resumeIdx === 0 && currentExIndex > 0) {
+      for (let i = 0; i < timeline.events.length; i++) {
+        const ev = timeline.events[i];
+        if (ev.meta?.exerciseIndex === currentExIndex && ev.meta?.phase === 'transition') {
+          resumeIdx = i;
+          break;
+        }
+      }
+    }
+
+    setCoachingElapsed(ts[resumeIdx] || 0);
+    setCoachingEventIdx(resumeIdx);
+    coachingPlayFromIndex(timeline, ts, resumeIdx);
   };
 
   const coachingSkipForward = () => {
@@ -871,7 +941,7 @@ function WorkoutScreenInner() {
         timedSetRef.current = null;
       }
     };
-  }, [phase, currentExIndex, currentSet, plan, voiceEnabled, coachingActive]);
+  }, [phase, currentExIndex, currentSet, plan, coachingActive]);
 
   // Auto counting effect - counts reps automatically with voice
   // 코칭 모드에서는 비활성화 (코칭 엔진이 카운트 사운드 재생)
@@ -951,7 +1021,7 @@ function WorkoutScreenInner() {
         } catch (e) {}
       }
     };
-  }, [autoCountActive, voiceEnabled, phase, countSpeed, currentExIndex, currentSet]);
+  }, [autoCountActive, phase, countSpeed, currentExIndex, currentSet]);
 
   // Fetch exercise media from ExerciseDB when exercise changes
   useEffect(() => {
@@ -1054,7 +1124,7 @@ function WorkoutScreenInner() {
       }
     });
     return () => sub.remove();
-  }, [isTimerRunning, phase, voiceEnabled]);
+  }, [isTimerRunning, phase]);
 
   if (!plan || !profile) {
     return (
@@ -1341,11 +1411,11 @@ function WorkoutScreenInner() {
                   style={[styles.splitChip, activeSplit === s && styles.splitChipActive]}
                   onPress={() => handleSelectSplit(s)}
                 >
-                  <Text style={styles.splitChipEmoji}>{SPLITS[s].emoji}</Text>
+                  <Text style={styles.splitChipEmoji}>{goalSplits[s]?.emoji || '💪'}</Text>
                   <Text style={[styles.splitChipLabel, activeSplit === s && styles.splitChipLabelActive]}>
-                    {SPLITS[s].label}
+                    {goalSplits[s]?.label || s}
                   </Text>
-                  <Text style={styles.splitChipDesc}>{SPLITS[s].desc}</Text>
+                  <Text style={styles.splitChipDesc}>{goalSplits[s]?.desc || ''}</Text>
                 </TouchableOpacity>
               ))}
               {activeSplit && (
@@ -1613,20 +1683,19 @@ function WorkoutScreenInner() {
             />
           </View>
 
-          {/* Voice + Guide toggle (코칭 중에는 음성 토글 숨김) */}
+          {/* Coaching toggle + Guide */}
           <View style={styles.toggleRow}>
-            {!coachingActive && (
-              <TouchableOpacity
-                style={[styles.toggleBtn, voiceEnabled && styles.toggleBtnActive]}
-                onPress={() => setVoiceEnabled(!voiceEnabled)}
-              >
-                <Text style={styles.toggleBtnText}>{voiceEnabled ? '🔊 음성 ON' : '🔇 음성 OFF'}</Text>
-              </TouchableOpacity>
-            )}
-            {coachingActive && (
+            {coachingActive ? (
               <View style={[styles.toggleBtn, styles.toggleBtnActive]}>
                 <Text style={styles.toggleBtnText}>🎧 코칭 중</Text>
               </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.toggleBtn, coachingPaused && styles.toggleBtnActive]}
+                onPress={resumeCoaching}
+              >
+                <Text style={styles.toggleBtnText}>{coachingPaused ? '🎧 코칭 재개' : '🎧 코칭 시작'}</Text>
+              </TouchableOpacity>
             )}
             <TouchableOpacity
               style={[styles.toggleBtn, showGuide && styles.toggleBtnActive]}
@@ -1879,7 +1948,7 @@ function WorkoutScreenInner() {
               <TouchableOpacity onPress={coachingSkipBackward}>
                 <Text style={styles.coachingBarBtn}>⏮</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={stopCoaching}>
+              <TouchableOpacity onPress={pauseCoaching}>
                 <Text style={styles.coachingBarBtn}>⏸</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={coachingSkipForward}>
@@ -1928,6 +1997,16 @@ function WorkoutScreenInner() {
             </TouchableOpacity>
           )}
 
+          {/* 코칭 재개 버튼 (일시정지 상태일 때) */}
+          {!coachingActive && coachingPaused && (
+            <TouchableOpacity
+              style={[styles.skipRestBtn, { backgroundColor: Colors.primary + '20', borderColor: Colors.primary, borderWidth: 1, marginTop: Spacing.sm }]}
+              onPress={resumeCoaching}
+            >
+              <Text style={[styles.skipRestBtnText, { color: Colors.primary }]}>🎧 오디오 코칭 재개</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Ad placeholder */}
           {!coachingActive && (
             <View style={styles.adPlaceholder}>
@@ -1941,7 +2020,7 @@ function WorkoutScreenInner() {
               <TouchableOpacity onPress={coachingSkipBackward}>
                 <Text style={styles.coachingBarBtn}>⏮</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={stopCoaching}>
+              <TouchableOpacity onPress={pauseCoaching}>
                 <Text style={styles.coachingBarBtn}>⏸</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={coachingSkipForward}>

@@ -2017,6 +2017,40 @@ export const exercises: Exercise[] = [
   },
 ];
 
+// ===== 분할 루틴 정의 =====
+
+export interface SplitDef {
+  label: string;
+  emoji: string;
+  desc: string;
+  parts: BodyPart[];
+}
+
+export const SPLIT_DEFS: Record<string, Record<'A' | 'B' | 'C', SplitDef>> = {
+  gain: {
+    A: { label: 'A 가슴·삼두', emoji: '🫁', desc: '가슴 + 삼두', parts: ['chest', 'arms'] },
+    B: { label: 'B 등·이두', emoji: '🔙', desc: '등 + 이두', parts: ['back', 'arms'] },
+    C: { label: 'C 하체·어깨', emoji: '🦵', desc: '하체 + 어깨', parts: ['legs', 'shoulder'] },
+  },
+  lose: {
+    A: { label: 'A 상체', emoji: '💪', desc: '가슴 + 등 + 어깨', parts: ['chest', 'back', 'shoulder'] },
+    B: { label: 'B 하체·코어', emoji: '🦵', desc: '하체 + 코어', parts: ['legs', 'core'] },
+    C: { label: 'C 전신·유산소', emoji: '🏃', desc: '유산소 + 팔 + 코어', parts: ['cardio', 'arms', 'core'] },
+  },
+  maintain: {
+    A: { label: 'A 밀기', emoji: '🫁', desc: '가슴 + 어깨 + 삼두', parts: ['chest', 'shoulder', 'arms'] },
+    B: { label: 'B 당기기', emoji: '🔙', desc: '등 + 이두', parts: ['back', 'arms'] },
+    C: { label: 'C 하체·코어', emoji: '🦵', desc: '하체 + 코어', parts: ['legs', 'core'] },
+  },
+};
+
+export function getNextSplit(lastSplit: string | null): 'A' | 'B' | 'C' {
+  if (!lastSplit) return 'A';
+  if (lastSplit === 'A') return 'B';
+  if (lastSplit === 'B') return 'C';
+  return 'A';
+}
+
 // ===== 운동 프로그램 생성 =====
 
 export interface SetDetail {
@@ -2110,6 +2144,116 @@ export function generateWorkoutPlan(
 function shuffleAndPick<T>(arr: T[], count: number): T[] {
   const shuffled = [...arr].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
+}
+
+// ===== 분할 기반 결정적 플랜 생성 =====
+
+export function generateSplitPlan(
+  goal: 'lose' | 'gain' | 'maintain',
+  experience: 'beginner' | 'intermediate' | 'advanced',
+  split: 'A' | 'B' | 'C',
+  options: {
+    savedExerciseIds?: string[];
+    savedWeights?: Record<string, number>;
+    blacklist?: string[];
+  } = {}
+): WorkoutPlan {
+  const splitDefs = SPLIT_DEFS[goal] || SPLIT_DEFS.maintain;
+  const splitDef = splitDefs[split];
+  const targetParts = splitDef.parts;
+
+  const difficultyFilter: Difficulty[] =
+    experience === 'beginner'
+      ? ['beginner']
+      : experience === 'intermediate'
+        ? ['beginner', 'intermediate']
+        : ['beginner', 'intermediate', 'advanced'];
+
+  const blacklist = options.blacklist ?? [];
+
+  // 사용 가능한 운동 필터링 (부위 + 난이도 + 블랙리스트 제외)
+  const available = exercises.filter(
+    (e) => targetParts.includes(e.bodyPart) &&
+           difficultyFilter.includes(e.difficulty) &&
+           !blacklist.includes(e.id)
+  );
+
+  const count = goal === 'lose' ? 6 : goal === 'gain' ? 5 : 6;
+  let selected: Exercise[];
+
+  if (options.savedExerciseIds && options.savedExerciseIds.length > 0) {
+    // 저장된 운동 목록 사용 (블랙리스트 제외된 운동은 대체)
+    selected = [];
+    for (const id of options.savedExerciseIds) {
+      if (blacklist.includes(id)) continue;
+      const ex = exercises.find((e) => e.id === id);
+      if (ex) selected.push(ex);
+    }
+    // 부족하면 추가
+    if (selected.length < count) {
+      const usedIds = new Set(selected.map((e) => e.id));
+      const extras = available.filter((e) => !usedIds.has(e.id));
+      // 결정적 정렬: 난이도 → 이름 순
+      extras.sort((a, b) => a.difficulty.localeCompare(b.difficulty) || a.name.localeCompare(b.name));
+      for (const ex of extras) {
+        if (selected.length >= count) break;
+        selected.push(ex);
+      }
+    }
+  } else {
+    // 첫 번째 생성: 결정적 정렬 (난이도 → 이름 순)으로 선택
+    const sorted = [...available].sort(
+      (a, b) => a.difficulty.localeCompare(b.difficulty) || a.name.localeCompare(b.name)
+    );
+    selected = sorted.slice(0, Math.min(count, sorted.length));
+  }
+
+  // 목표별 세트/렙 조정 + 저장된 무게 적용
+  const plan = selected.map((exercise) => {
+    let sets = exercise.defaultSets;
+    let reps = exercise.defaultReps;
+
+    if (goal === 'lose') {
+      sets = Math.max(3, sets);
+      if (!reps.includes('초')) {
+        const baseReps = parseInt(reps) || 12;
+        reps = String(Math.min(baseReps + 5, 20));
+      }
+    } else if (goal === 'gain') {
+      sets = Math.min(sets + 1, 5);
+      if (!reps.includes('초') && !reps.includes('(')) {
+        const baseReps = parseInt(reps) || 12;
+        reps = String(Math.max(baseReps - 2, 6));
+      }
+    }
+
+    // 저장된 무게 또는 기본 무게
+    const savedWeight = options.savedWeights?.[exercise.id];
+    const defaultWeight = exercise.equipment === 'bodyweight' ? 0 : 20;
+    const weight = savedWeight ?? defaultWeight;
+
+    const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({
+      weight,
+      reps,
+    }));
+
+    return {
+      exercise,
+      setDetails,
+      restSeconds: goal === 'lose' ? Math.max(30, exercise.restSeconds - 15) : exercise.restSeconds,
+    };
+  });
+
+  const totalSets = plan.reduce((sum, p) => sum + p.setDetails.length, 0);
+  const estimatedCalories = plan.reduce((sum, p) => sum + p.exercise.caloriesPerSet * p.setDetails.length, 0);
+  const estimatedMinutes = Math.round(totalSets * 1.5 + totalSets * (plan[0]?.restSeconds || 60) / 60);
+
+  return {
+    name: `${splitDef.label} 워크아웃`,
+    exercises: plan,
+    estimatedMinutes,
+    estimatedCalories,
+  };
 }
 
 // ===== 요일별 추천 부위 =====
