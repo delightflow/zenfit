@@ -802,7 +802,9 @@ function WorkoutScreenInner() {
   // 운동 진입 시 자동 진행 모드 활성화:
   // - 횟수 세트: 자동 카운트 ON
   // - 시간 세트: 타이머 모드로 자동 완료
+  // - 코칭 모드에서는 코칭 엔진이 진행을 제어하므로 비활성화
   useEffect(() => {
+    if (coachingActive) return;
     if (!plan || phase !== 'exercise') return;
     const sd = plan.exercises[currentExIndex]?.setDetails[currentSet];
     if (!sd) return;
@@ -814,10 +816,12 @@ function WorkoutScreenInner() {
     }
     setSetRemaining(null);
     setAutoCountActive(true);
-  }, [phase, currentExIndex, currentSet, plan]);
+  }, [phase, currentExIndex, currentSet, plan, coachingActive]);
 
   // 시간 기반 세트(예: 30초, 1분)는 별도 자동 타이머로 완료
+  // 코칭 모드에서는 코칭 엔진이 타이밍을 제어하므로 비활성화
   useEffect(() => {
+    if (coachingActive) return;
     if (!plan || phase !== 'exercise') {
       setSetRemaining(null);
       if (timedSetRef.current) {
@@ -867,9 +871,10 @@ function WorkoutScreenInner() {
         timedSetRef.current = null;
       }
     };
-  }, [phase, currentExIndex, currentSet, plan, voiceEnabled]);
+  }, [phase, currentExIndex, currentSet, plan, voiceEnabled, coachingActive]);
 
   // Auto counting effect - counts reps automatically with voice
+  // 코칭 모드에서는 비활성화 (코칭 엔진이 카운트 사운드 재생)
   useEffect(() => {
     const useNativeAutoCount =
       Platform.OS === 'android' &&
@@ -878,6 +883,8 @@ function WorkoutScreenInner() {
       typeof AudioService?.stopAutoCount === 'function';
 
     let completed = false;
+
+    if (coachingActive) return; // 코칭 모드에서는 자동 카운트 비활성화
 
     if (autoCountActive && phase === 'exercise') {
       const currentPlan = plan?.exercises[currentExIndex];
@@ -999,9 +1006,9 @@ function WorkoutScreenInner() {
         if (remaining <= 0) {
           restEndAtRef.current = 0;
           setRestTime(0);
-          vibrate(500);
+          if (!coachingActive) vibrate(500);
           setPhase('exercise'); // isTimerRunning 유지 → exercise 타이머 자동 재시작
-          if (voiceEnabled) {
+          if (voiceEnabled && !coachingActive) {
             playCountAudio(PHRASE_SOUND_SOURCES.go);
           }
         } else {
@@ -1034,8 +1041,8 @@ function WorkoutScreenInner() {
             setIsTimerRunning(false);
             setRestTime(0);
             setPhase('exercise');
-            vibrate(500);
-            if (voiceEnabled) {
+            if (!coachingActive) vibrate(500);
+            if (voiceEnabled && !coachingActive) {
               playCountAudio(PHRASE_SOUND_SOURCES.go);
             }
           } else {
@@ -1107,7 +1114,7 @@ function WorkoutScreenInner() {
   };
 
   const handleSetComplete = () => {
-    vibrate(200);
+    if (!coachingActive) vibrate(200);
     setAutoCountActive(false);
     setSetRemaining(null);
 
@@ -1125,15 +1132,14 @@ function WorkoutScreenInner() {
       setRestTime(currentPlanItem.restSeconds);
       setPhase('rest');
       setIsTimerRunning(true);
-      showInterstitialIfReady(); // 휴식시간 광고
-      if (voiceEnabled) {
+      if (!coachingActive) showInterstitialIfReady(); // 휴식시간 광고
+      if (voiceEnabled && !coachingActive) {
         playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
         setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
       }
     } else if (currentExIndex < totalExercises - 1) {
       // Next exercise
       const nextIdx = currentExIndex + 1;
-      const nextEx = plan.exercises[nextIdx].exercise;
       restEndAtRef.current = 0;
       setCurrentExIndex(nextIdx);
       setCurrentSet(0);
@@ -1141,8 +1147,8 @@ function WorkoutScreenInner() {
       setRestTime(currentPlanItem.restSeconds + EXERCISE_PREP_SECONDS);
       setPhase('rest');
       setIsTimerRunning(true);
-      showInterstitialIfReady(); // 운동 간 휴식시간 광고
-      if (voiceEnabled) {
+      if (!coachingActive) showInterstitialIfReady(); // 운동 간 휴식시간 광고
+      if (voiceEnabled && !coachingActive) {
         playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
         setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
       }
@@ -1164,7 +1170,7 @@ function WorkoutScreenInner() {
         setRestTime(EXERCISE_PREP_SECONDS);
         setPhase('rest');
         setIsTimerRunning(true);
-        if (voiceEnabled) {
+        if (voiceEnabled && !coachingActive) {
           playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
           setTimeout(() => speak('다음 사이클 시작합니다'), 1000);
         }
@@ -1209,7 +1215,7 @@ function WorkoutScreenInner() {
       calories: plan.estimatedCalories,
     });
 
-    if (voiceEnabled) {
+    if (voiceEnabled && !coachingActive) {
       playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
     }
     vibrate([0, 200, 100, 200, 100, 400]);
@@ -1607,14 +1613,21 @@ function WorkoutScreenInner() {
             />
           </View>
 
-          {/* Voice + Guide toggle */}
+          {/* Voice + Guide toggle (코칭 중에는 음성 토글 숨김) */}
           <View style={styles.toggleRow}>
-            <TouchableOpacity
-              style={[styles.toggleBtn, voiceEnabled && styles.toggleBtnActive]}
-              onPress={() => setVoiceEnabled(!voiceEnabled)}
-            >
-              <Text style={styles.toggleBtnText}>{voiceEnabled ? '🔊 음성 ON' : '🔇 음성 OFF'}</Text>
-            </TouchableOpacity>
+            {!coachingActive && (
+              <TouchableOpacity
+                style={[styles.toggleBtn, voiceEnabled && styles.toggleBtnActive]}
+                onPress={() => setVoiceEnabled(!voiceEnabled)}
+              >
+                <Text style={styles.toggleBtnText}>{voiceEnabled ? '🔊 음성 ON' : '🔇 음성 OFF'}</Text>
+              </TouchableOpacity>
+            )}
+            {coachingActive && (
+              <View style={[styles.toggleBtn, styles.toggleBtnActive]}>
+                <Text style={styles.toggleBtnText}>🎧 코칭 중</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.toggleBtn, showGuide && styles.toggleBtnActive]}
               onPress={() => setShowGuide(!showGuide)}
@@ -1698,8 +1711,8 @@ function WorkoutScreenInner() {
               {ex.secondaryParts?.map((p) => ` + ${BODY_PART_LABELS[p]}`).join('')}
             </Text>
 
-            {/* Timed Set (automatic) */}
-            {setRemaining !== null && (
+            {/* Timed Set (automatic) — 코칭 중에는 숨김 */}
+            {!coachingActive && setRemaining !== null && (
               <View style={styles.autoCounterContainer}>
                 <View style={styles.repCounterBtn}>
                   <Text style={styles.repCounterNumber}>{setRemaining}</Text>
@@ -1711,8 +1724,8 @@ function WorkoutScreenInner() {
               </View>
             )}
 
-            {/* Auto Counter - always automatic after workout start */}
-            {parseTimedSeconds(sd.reps) === null && (
+            {/* Auto Counter — 코칭 중에는 숨김 (코칭 엔진이 카운트 재생) */}
+            {!coachingActive && parseTimedSeconds(sd.reps) === null && (
               <View style={styles.autoCounterContainer}>
                 {/* Count display */}
                 <View style={styles.repCounterBtn}>
