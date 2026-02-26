@@ -41,6 +41,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding/index" options={{ animation: 'fade' }} />
         <Stack.Screen name="workout/index" options={{ animation: 'fade' }} />
+        <Stack.Screen name="audio-coaching/index" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </>
   );
