@@ -1332,6 +1332,19 @@ function WorkoutScreenInner() {
   };
 
   // Per-set weight/reps editing
+  const handleSetWeightInput = (exIndex: number, setIndex: number, raw: string) => {
+    if (!plan) return;
+    const sanitized = raw.replace(/[^0-9.]/g, '');
+    const updated = { ...plan };
+    const sd = { ...updated.exercises[exIndex].setDetails[setIndex] };
+    sd.weight = sanitized === '' ? 0 : parseFloat(sanitized) || 0;
+    updated.exercises[exIndex] = {
+      ...updated.exercises[exIndex],
+      setDetails: updated.exercises[exIndex].setDetails.map((s, i) => i === setIndex ? sd : s),
+    };
+    setPlan({ ...updated });
+  };
+
   const handleUpdateSetWeight = (exIndex: number, setIndex: number, delta: number) => {
     if (!plan) return;
     const updated = { ...plan };
@@ -1860,36 +1873,28 @@ function WorkoutScreenInner() {
 
                     {isWeighted && (
                       <>
-                        {isEditable ? (
-                          <View style={styles.setValueGroup}>
-                            <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(currentExIndex, idx, -2.5)}>
-                              <Text style={styles.miniBtnText}>-</Text>
-                            </TouchableOpacity>
-                            <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>{s.weight}</Text>
-                            <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(currentExIndex, idx, 2.5)}>
-                              <Text style={styles.miniBtnText}>+</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <Text style={styles.exSetValue}>{s.weight}</Text>
-                        )}
+                        <TextInput
+                          style={[styles.exSetNumInput, isEditable && styles.exSetNumInputActive]}
+                          value={String(s.weight)}
+                          onChangeText={(v) => isEditable && handleSetWeightInput(currentExIndex, idx, v)}
+                          keyboardType="numeric"
+                          selectTextOnFocus
+                          editable={isEditable}
+                        />
                         <Text style={styles.exSetUnit}>kg</Text>
                         <Text style={styles.exSetDivider}>/</Text>
                       </>
                     )}
 
-                    {isEditable ? (
-                      <TextInput
-                        style={[styles.repsInput, isCurrent && { borderColor: Colors.primary }]}
-                        value={s.reps}
-                        onChangeText={(v) => handleUpdateSetReps(currentExIndex, idx, v)}
-                        keyboardType="default"
-                        selectTextOnFocus
-                      />
-                    ) : (
-                      <Text style={styles.exSetValue}>{s.reps}</Text>
-                    )}
-                    <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '' : '회'}</Text>
+                    <TextInput
+                      style={[styles.exSetNumInput, isEditable && styles.exSetNumInputActive, isCurrent && isEditable && styles.exSetNumInputCurrent]}
+                      value={s.reps}
+                      onChangeText={(v) => isEditable && handleUpdateSetReps(currentExIndex, idx, v)}
+                      keyboardType="numeric"
+                      selectTextOnFocus
+                      editable={isEditable}
+                    />
+                    <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '초' : '회'}</Text>
                   </View>
                 );
               })}
@@ -2468,6 +2473,23 @@ const styles = StyleSheet.create({
   exSetValueCurrent: { color: Colors.primary },
   exSetUnit: { fontSize: FontSize.sm, color: Colors.textMuted },
   exSetDivider: { fontSize: FontSize.lg, color: Colors.textMuted, marginHorizontal: 4 },
+  exSetNumInput: {
+    fontSize: FontSize.xxl,
+    fontWeight: '800',
+    color: Colors.textMuted,
+    minWidth: 48,
+    textAlign: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  exSetNumInputActive: {
+    color: Colors.text,
+  },
+  exSetNumInputCurrent: {
+    backgroundColor: 'rgba(78, 238, 176, 0.15)',
+    color: Colors.primary,
+  },
 
   // 다음 운동 미리보기 카드
   nextExCard: {
