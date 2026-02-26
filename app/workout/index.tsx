@@ -1844,6 +1844,7 @@ function WorkoutScreenInner() {
               {currentPlanItem.setDetails.map((s, idx) => {
                 const isCurrent = idx === currentSet;
                 const isDone = s.completed;
+                const isEditable = !isDone;
                 return (
                   <View
                     key={idx}
@@ -1859,17 +1860,35 @@ function WorkoutScreenInner() {
 
                     {isWeighted && (
                       <>
-                        <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
-                          {s.weight}
-                        </Text>
+                        {isEditable ? (
+                          <View style={styles.setValueGroup}>
+                            <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(currentExIndex, idx, -2.5)}>
+                              <Text style={styles.miniBtnText}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>{s.weight}</Text>
+                            <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(currentExIndex, idx, 2.5)}>
+                              <Text style={styles.miniBtnText}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={styles.exSetValue}>{s.weight}</Text>
+                        )}
                         <Text style={styles.exSetUnit}>kg</Text>
                         <Text style={styles.exSetDivider}>/</Text>
                       </>
                     )}
 
-                    <Text style={[styles.exSetValue, isCurrent && styles.exSetValueCurrent]}>
-                      {s.reps}
-                    </Text>
+                    {isEditable ? (
+                      <TextInput
+                        style={[styles.repsInput, isCurrent && { borderColor: Colors.primary }]}
+                        value={s.reps}
+                        onChangeText={(v) => handleUpdateSetReps(currentExIndex, idx, v)}
+                        keyboardType="default"
+                        selectTextOnFocus
+                      />
+                    ) : (
+                      <Text style={styles.exSetValue}>{s.reps}</Text>
+                    )}
                     <Text style={styles.exSetUnit}>{s.reps.includes('초') ? '' : '회'}</Text>
                   </View>
                 );
