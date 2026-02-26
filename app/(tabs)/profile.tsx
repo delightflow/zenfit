@@ -200,7 +200,7 @@ export default function ProfileScreen() {
             {
               version: 'v1.1.0',
               date: '2026-02-23',
-              changes: ['음성 ON 시 네비바 가림 현상 수정', '백그라운드 음성 카운팅 안정성 개선', '운동 이미지 로딩 개선', '앱 이름 RunFit으로 변경', 'AdMob 휴식시간 광고 준비'],
+              changes: ['오디오 코칭 모드 추가', 'A/B/C 분할 루틴 시스템', '코칭 일시정지/재개 기능', '앱 리브랜딩: 심핏(SimFit)'],
             },
             {
               version: 'v1.0.2',
@@ -232,7 +232,7 @@ export default function ProfileScreen() {
 
         {/* App info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appInfoText}>RunFit v1.1.0</Text>
+          <Text style={styles.appInfoText}>심핏 SimFit v1.1.0</Text>
           <Text style={styles.appInfoText}>나만의 AI 운동 습관</Text>
           <Text style={{ color: Colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'center' }}>
             {Updates?.updateId

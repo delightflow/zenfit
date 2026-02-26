@@ -169,7 +169,7 @@ export default function OnboardingScreen() {
         {step === 'welcome' && (
           <View style={styles.center}>
             <Text style={styles.logo}>🏋️‍♂️</Text>
-            <Text style={styles.appName}>RunFit</Text>
+            <Text style={styles.appName}>심핏</Text>
             <Text style={styles.tagline}>AI가 만드는 나만의 운동 습관</Text>
             <Text style={styles.description}>
               매일 조금씩, 꾸준히.{'\n'}

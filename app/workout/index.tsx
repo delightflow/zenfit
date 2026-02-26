@@ -867,7 +867,7 @@ function WorkoutScreenInner() {
       const exName = plan?.exercises[currentExIndex]?.exercise?.name ?? '운동';
       const setNum = currentSet + 1;
       const phaseLabel = phase === 'rest' ? '휴식 중' : `${setNum}세트 진행 중`;
-      updateWorkoutNotification('RunFit 운동 중 🏋️', `${exName} · ${phaseLabel}`);
+      updateWorkoutNotification('심핏 운동 중 🏋️', `${exName} · ${phaseLabel}`);
     } else {
       (async () => {
         try {
