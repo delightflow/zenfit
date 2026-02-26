@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm view:*)",
+      "Bash(echo NODE_OPTIONS=$NODE_OPTIONS:*)",
+      "Bash(env:*)",
+      "Bash(echo NVM_HOME=$NVM_HOME:*)",
+      "Bash(node:*)",
+      "Bash(npm ls:*)",
+      "WebSearch",
+      "Bash(npx eas update:list --branch production --non-interactive --json)"
+    ]
+  }
+}
