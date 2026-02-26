@@ -79,10 +79,11 @@ export function generateCoachingTimeline(
   const countSpeed = (options?.countSpeedSec ?? 3) * 1000;
   const events: AudioEvent[] = [];
 
-  // --- Intro ---
+  // --- Intro (placeholder — payload updated after total duration is known) ---
+  const introIdx = events.length;
   events.push({
     type: 'speech',
-    payload: `${plan.name}을 시작합니다. 총 ${plan.exercises.length}개 운동, 약 ${plan.estimatedMinutes}분 소요됩니다. 준비되셨으면 시작하겠습니다.`,
+    payload: '', // filled in below
     durationMs: 4000,
     meta: { phase: 'intro', label: '운동 시작 안내' },
   });
@@ -127,17 +128,20 @@ export function generateCoachingTimeline(
 
     // --- Each set ---
     sets.forEach((sd, setIdx) => {
-      // Set announcement
+      // Set announcement with weight info
+      const weightInfo = sd.weight > 0 ? ` ${sd.weight}킬로그램,` : '';
+      const repsInfo = isTimeBased ? ` ${sd.reps}` : ` ${sd.reps}회`;
+      const setAnnounce = `${setIdx + 1}세트,${weightInfo}${repsInfo} 시작합니다.`;
       events.push({
         type: 'speech',
-        payload: `${setIdx + 1}세트 시작합니다.`,
-        durationMs: 1500,
+        payload: setAnnounce,
+        durationMs: estimateSpeechDurationMs(setAnnounce),
         meta: {
           exerciseIndex: exIdx,
           exerciseName: ex.name,
           setIndex: setIdx,
           phase: 'exercise',
-          label: `${setIdx + 1}세트 시작`,
+          label: `${setIdx + 1}세트${sd.weight > 0 ? ` ${sd.weight}kg` : ''} 시작`,
         },
       });
 
@@ -368,12 +372,19 @@ export function generateCoachingTimeline(
     meta: { phase: 'outro', label: '완료 사운드' },
   });
 
-  // Calculate total duration
+  // Calculate total duration and patch intro with accurate time
   const totalDurationMs = events.reduce((sum, e) => sum + e.durationMs, 0);
+  const totalMinutes = Math.round(totalDurationMs / 60000);
+  const introPayload = `${plan.name}을 시작합니다. 총 ${plan.exercises.length}개 운동, 약 ${totalMinutes}분 소요됩니다. 준비되셨으면 시작하겠습니다.`;
+  events[introIdx].payload = introPayload;
+  events[introIdx].durationMs = estimateSpeechDurationMs(introPayload);
+
+  // Recalculate after patching intro
+  const finalDurationMs = events.reduce((sum, e) => sum + e.durationMs, 0);
 
   return {
     events,
-    totalDurationMs,
+    totalDurationMs: finalDurationMs,
     exerciseCount: plan.exercises.length,
     planName: plan.name,
   };
