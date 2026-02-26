@@ -677,6 +677,8 @@ function WorkoutScreenInner() {
             COUNT_SOUND_SOURCES[1],
             { isLooping: true, volume: 0.001 }
           );
+          // Fast native callbacks keep JS thread alive in background
+          await sound.setProgressUpdateIntervalAsync(200);
           silentSoundRef.current = sound;
           await sound.playAsync();
           console.log('[ZenFit] Background silent loop started');
@@ -968,20 +970,13 @@ function WorkoutScreenInner() {
     return () => clearTimeout(t);
   }, [currentExIndex, phase, voiceOnlyMode]);
 
-  // 음성 전용 모드: 화면 켜짐 방지 해제 (화면이 자동으로 꺼져 배터리 절약)
+  // 음성 전용 모드: 화면은 항상 켜진 채 유지 (잠금 오버레이로 대체)
+  // 화면을 실제로 끄면 Android가 JS/오디오를 중단시킬 수 있음
   useEffect(() => {
-    if (voiceOnlyMode) {
-      try {
-        // deactivateKeepAwake가 있으면 호출 (expo-keep-awake 프로그래매틱 API)
-        const kaw = require('expo-keep-awake');
-        kaw.deactivateKeepAwake?.();
-      } catch (e) {}
-    } else {
-      try {
-        const kaw = require('expo-keep-awake');
-        kaw.activateKeepAwakeAsync?.().catch(() => {});
-      } catch (e) {}
-    }
+    try {
+      const kaw = require('expo-keep-awake');
+      kaw.activateKeepAwakeAsync?.().catch(() => {});
+    } catch (e) {}
   }, [voiceOnlyMode]);
 
   if (!plan || !profile) {
@@ -1435,16 +1430,6 @@ function WorkoutScreenInner() {
             <Text style={styles.startBtnText}>운동 시작 🚀</Text>
           </TouchableOpacity>
 
-          {/* 오디오 코칭 모드: 전체 운동을 연속 오디오로 재생 (잠금화면 지원) */}
-          <TouchableOpacity
-            style={[styles.startBtn, { backgroundColor: '#242424', marginTop: Spacing.sm, borderWidth: 1, borderColor: Colors.primary }]}
-            onPress={() => router.push('/audio-coaching')}
-          >
-            <Text style={[styles.startBtnText, { color: Colors.primary }]}>🎧 오디오 코칭 모드</Text>
-          </TouchableOpacity>
-          <Text style={{ color: Colors.textMuted, fontSize: FontSize.xs, textAlign: 'center', marginTop: Spacing.xs, marginHorizontal: Spacing.lg }}>
-            실제 코치처럼 종목·카운트·쉬는시간을 자동 안내합니다. 잠금화면에서도 재생!
-          </Text>
 
           <View style={{ height: Spacing.xxl }} />
         </ScrollView>
