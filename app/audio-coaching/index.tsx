@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Platform, ActivityIndicator, BackHandler, AppState,
+  Platform, ActivityIndicator, BackHandler, AppState, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+
+let useKeepAwake: any = null;
+try { useKeepAwake = require('expo-keep-awake').useKeepAwake; } catch {}
 
 // === Dynamic imports ===
 let Colors: any, Spacing: any, FontSize: any, BorderRadius: any;
@@ -98,9 +101,13 @@ const getSoundSource = (key: string): any => {
 // === Audio Coaching Player ===
 
 export default function AudioCoachingScreen() {
+  // Keep screen awake during coaching
+  useKeepAwake?.();
+
   const profile = useStore?.((s: any) => s.profile);
   const completeToday = useStore?.((s: any) => s.completeToday);
   const addWorkoutLog = useStore?.((s: any) => s.addWorkoutLog);
+  const [lockScreen, setLockScreen] = useState(false);
 
   const [timeline, setTimeline] = useState<CoachingTimeline | null>(null);
   const [timestamps, setTimestamps] = useState<number[]>([]);
@@ -252,9 +259,38 @@ export default function AudioCoachingScreen() {
     });
   };
 
+  // Use expo-av playback status updates as timer instead of setTimeout.
+  // setTimeout freezes when Android backgrounds the app, but native
+  // audio callbacks keep firing and can wake the JS thread.
   const waitMs = (ms: number): Promise<void> => {
     return new Promise((resolve) => {
-      timeoutRef.current = setTimeout(resolve, ms);
+      if (ms <= 0 || abortRef.current) { resolve(); return; }
+
+      const silentSound = silentSoundRef.current;
+      if (!silentSound) {
+        // Fallback if no silent loop
+        timeoutRef.current = setTimeout(resolve, ms);
+        return;
+      }
+
+      let resolved = false;
+      const deadline = Date.now() + ms;
+
+      const check = () => {
+        if (resolved) return;
+        if (Date.now() >= deadline || abortRef.current) {
+          resolved = true;
+          silentSound.setOnPlaybackStatusUpdate(null);
+          resolve();
+        }
+      };
+
+      silentSound.setOnPlaybackStatusUpdate(check);
+
+      // Safety fallback (fires only if native callbacks stop)
+      timeoutRef.current = setTimeout(() => {
+        if (!resolved) { resolved = true; silentSound.setOnPlaybackStatusUpdate(null); resolve(); }
+      }, ms + 3000);
     });
   };
 
@@ -266,6 +302,8 @@ export default function AudioCoachingScreen() {
         COUNT_SOUND_SOURCES[1],
         { isLooping: true, volume: 0.001 }
       );
+      // Fast status updates so waitMs gets ~200ms resolution
+      await sound.setProgressUpdateIntervalAsync(200);
       silentSoundRef.current = sound;
       await sound.playAsync();
       console.log('[AudioCoaching] Background silent loop started');
@@ -453,6 +491,57 @@ export default function AudioCoachingScreen() {
 
   // === Render ===
 
+  // Lock screen mode — minimal dark UI, screen stays on
+  if (lockScreen && isPlaying) {
+    return (
+      <View style={s.lockContainer}>
+        <SafeAreaView style={s.lockSafe}>
+          {/* Tap to unlock hint */}
+          <Text style={s.lockHint}>화면을 탭하면 돌아갑니다</Text>
+
+          {/* Exercise info */}
+          <View style={s.lockCenter}>
+            <Text style={s.lockEmoji}>
+              {currentMeta?.phase === 'rest' ? '😮‍💨' : currentMeta?.phase === 'outro' ? '🎉' : '🏋️'}
+            </Text>
+            <Text style={s.lockTitle}>
+              {currentMeta?.exerciseName || timeline?.planName || '운동 코칭'}
+            </Text>
+            <Text style={s.lockSubtitle}>
+              {currentMeta?.label || phaseLabel(currentMeta?.phase)}
+            </Text>
+
+            {/* Large progress */}
+            <Text style={s.lockTime}>
+              {formatDuration(elapsedMs)} / {timeline ? formatDuration(timeline.totalDurationMs) : '0:00'}
+            </Text>
+            <View style={s.lockProgressBar}>
+              <View style={[s.lockProgressFill, { width: `${progress}%` }]} />
+            </View>
+          </View>
+
+          {/* Controls */}
+          <View style={s.lockControls}>
+            <TouchableOpacity style={s.controlBtn} onPress={skipBackward}>
+              <Text style={s.controlIcon}>{'⏮'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.playBtn} onPress={stopPlayback}>
+              <Text style={s.playIcon}>{'⏸'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.controlBtn} onPress={skipForward}>
+              <Text style={s.controlIcon}>{'⏭'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Unlock button */}
+          <TouchableOpacity style={s.unlockBtn} onPress={() => setLockScreen(false)}>
+            <Text style={s.unlockBtnText}>잠금 해제</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   if (isPreparing) {
     return (
       <SafeAreaView style={s.container}>
@@ -545,6 +634,13 @@ export default function AudioCoachingScreen() {
               <Text style={s.controlIcon}>{'⏭'}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Lock screen button */}
+          {isPlaying && (
+            <TouchableOpacity style={s.lockBtn} onPress={() => setLockScreen(true)}>
+              <Text style={s.lockBtnText}>화면 잠금 모드</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Info Card */}
@@ -577,13 +673,13 @@ export default function AudioCoachingScreen() {
           </View>
         </View>
 
-        {/* Background playback notice */}
+        {/* Lock screen notice */}
         <View style={s.noticeCard}>
           <Text style={s.noticeIcon}>{'🔒'}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={s.noticeTitle}>잠금화면에서도 재생됩니다</Text>
+            <Text style={s.noticeTitle}>화면 잠금 모드를 사용하세요</Text>
             <Text style={s.noticeDesc}>
-              오디오 코칭은 화면이 꺼지거나 잠금 상태에서도 계속 재생됩니다. 이어폰을 착용하고 운동에 집중하세요.
+              재생 중 "화면 잠금 모드"를 누르면 화면이 어둡게 유지되며 오디오만 계속 재생됩니다. 이어폰을 착용하고 운동에 집중하세요.
             </Text>
           </View>
         </View>
@@ -917,5 +1013,97 @@ const s = StyleSheet.create({
     color: '#6B7280',
     fontSize: 12,
     marginTop: 2,
+  },
+
+  // Lock screen button (in controls)
+  lockBtn: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: '#242424',
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+  },
+  lockBtnText: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Lock screen mode
+  lockContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  lockSafe: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  lockHint: {
+    color: '#4A4A4A',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  lockCenter: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  lockEmoji: {
+    fontSize: 72,
+    marginBottom: 20,
+  },
+  lockTitle: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  lockSubtitle: {
+    color: '#4EEEB0',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  lockTime: {
+    color: '#9CA3AF',
+    fontSize: 36,
+    fontWeight: '300',
+    marginTop: 32,
+    fontVariant: ['tabular-nums'],
+  },
+  lockProgressBar: {
+    width: '100%',
+    height: 3,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 2,
+    marginTop: 16,
+    overflow: 'hidden',
+  },
+  lockProgressFill: {
+    height: '100%',
+    backgroundColor: '#4EEEB0',
+    borderRadius: 2,
+  },
+  lockControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 36,
+  },
+  unlockBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+  },
+  unlockBtnText: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
