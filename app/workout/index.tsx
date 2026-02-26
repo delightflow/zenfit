@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert, Image, NativeModules, BackHandler, AppState, PanResponder, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Vibration, Modal, FlatList, TextInput, Platform, ActivityIndicator, Alert, Image, NativeModules, BackHandler, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
@@ -45,6 +45,14 @@ try {
 } catch (e: any) {
   MODULE_ERRORS.push(`exercises: ${e?.message}`);
 }
+
+let generateCoachingTimeline: any, getEventTimestamps: any, findEventAtTime: any;
+try {
+  const ac = require('../../services/audioCoaching');
+  generateCoachingTimeline = ac.generateCoachingTimeline;
+  getEventTimestamps = ac.getEventTimestamps;
+  findEventAtTime = ac.findEventAtTime;
+} catch {}
 
 type Phase = 'preview' | 'exercise' | 'rest' | 'complete';
 const EXERCISE_PREP_SECONDS = 20;
@@ -99,154 +107,6 @@ try {
 } catch (e) {
   // expo-speech not available
 }
-
-// ===== 잠금 화면 오버레이 컴포넌트 =====
-// 경쟁사 앱(GymStreak 등) 스타일: 어두운 오버레이 + 총 운동 시간 + 밀어서 잠금 해제
-function WorkoutLockScreen({
-  startTimestamp,
-  exerciseName,
-  progress,
-  restTime,
-  phase,
-  onUnlock,
-  onPrev,
-  onNext,
-}: {
-  startTimestamp: number;
-  exerciseName: string;
-  progress: string;
-  restTime: number;
-  phase: string;
-  onUnlock: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-}) {
-  const [elapsed, setElapsed] = useState(Math.floor((Date.now() - startTimestamp) / 1000));
-  useEffect(() => {
-    const t = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimestamp) / 1000));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [startTimestamp]);
-
-  const slideX = useRef(new Animated.Value(0)).current;
-  const SLIDE_WIDTH = 260;
-  const THUMB_SIZE = 52;
-  const THRESHOLD = SLIDE_WIDTH - THUMB_SIZE - 16;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gs) => {
-        const x = Math.max(0, Math.min(gs.dx, THRESHOLD));
-        slideX.setValue(x);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dx >= THRESHOLD) {
-          onUnlock();
-          slideX.setValue(0);
-        } else {
-          Animated.spring(slideX, { toValue: 0, useNativeDriver: false }).start();
-        }
-      },
-    })
-  ).current;
-
-  const formatT = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  };
-
-  return (
-    <View style={lockStyles.overlay}>
-      {/* 상단: 진행 상태 */}
-      <View style={lockStyles.topInfo}>
-        <Text style={lockStyles.topProgress}>{progress}</Text>
-        <Text style={lockStyles.topExName}>{exerciseName}</Text>
-      </View>
-
-      {/* 중앙: 총 운동 시간 */}
-      <View style={lockStyles.center}>
-        <Text style={lockStyles.totalLabel}>총 운동 시간</Text>
-        <Text style={lockStyles.totalTime}>{formatT(elapsed)}</Text>
-        {phase === 'rest' && (
-          <Text style={lockStyles.restCountdown}>{formatT(restTime)}</Text>
-        )}
-      </View>
-
-      {/* 밀어서 잠금 해제 */}
-      <View style={lockStyles.sliderTrack}>
-        <Text style={lockStyles.sliderLabel}>밀어서 잠금 해제</Text>
-        <Animated.View
-          style={[lockStyles.sliderThumb, { transform: [{ translateX: slideX }] }]}
-          {...panResponder.panHandlers}
-        >
-          <Text style={lockStyles.sliderArrow}>→</Text>
-        </Animated.View>
-      </View>
-
-      {/* 하단 네비게이션 */}
-      <View style={lockStyles.navRow}>
-        <TouchableOpacity style={lockStyles.navBtn} onPress={onPrev}>
-          <Text style={lockStyles.navText}>⏮</Text>
-        </TouchableOpacity>
-        <View style={lockStyles.navCenter} />
-        <TouchableOpacity style={lockStyles.navBtn} onPress={onNext}>
-          <Text style={lockStyles.navText}>⏭</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
-const lockStyles = StyleSheet.create({
-  overlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    zIndex: 999,
-    justifyContent: 'space-between',
-    paddingTop: 60, paddingBottom: 40, paddingHorizontal: 24,
-  },
-  topInfo: { alignItems: 'flex-start' },
-  topProgress: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '600' },
-  topExName: { color: 'rgba(255,255,255,0.85)', fontSize: 20, fontWeight: '700', marginTop: 4 },
-  center: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  totalLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '600', marginBottom: 8 },
-  totalTime: { color: '#FFFFFF', fontSize: 80, fontWeight: '800', letterSpacing: 2 },
-  restCountdown: { color: 'rgba(255,255,255,0.4)', fontSize: 28, fontWeight: '700', marginTop: 8 },
-  sliderTrack: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 40, height: 68, width: 280,
-    alignSelf: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    overflow: 'hidden',
-    marginBottom: 32,
-  },
-  sliderLabel: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 15, fontWeight: '600',
-    textAlign: 'center',
-  },
-  sliderThumb: {
-    position: 'absolute', left: 8,
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  sliderArrow: { fontSize: 22, color: '#0D0D0D' },
-  navRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  navBtn: {
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  navText: { fontSize: 22, color: 'rgba(255,255,255,0.7)' },
-  navCenter: { flex: 1 },
-});
 
 // Keep screen awake during workout (운동 중 화면 꺼짐 방지)
 let useKeepAwake: any = null;
@@ -471,6 +331,15 @@ const vibrate = (pattern?: number | number[]) => {
   }
 };
 
+// === Audio Coaching Engine Helper ===
+const getSoundSource = (key: string): any => {
+  if (key.startsWith('count_')) {
+    const n = parseInt(key.replace('count_', ''));
+    return COUNT_SOUND_SOURCES[n];
+  }
+  return (PHRASE_SOUND_SOURCES as any)[key];
+};
+
 // If module imports failed, show error immediately
 export default function WorkoutScreenWrapper() {
   if (MODULE_ERRORS.length > 0) {
@@ -524,7 +393,6 @@ function WorkoutScreenInner() {
   const [showAddExercise, setShowAddExercise] = useState(false); // 운동 추가 모달
   const [addSearchQuery, setAddSearchQuery] = useState(''); // 운동 추가 검색
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceOnlyMode, setVoiceOnlyMode] = useState(false); // 음성 전용 모드 (화면 꺼짐 허용 + TTS 운동명 읽기)
   const [repCount, setRepCount] = useState(0); // Auto voice counting
   const [autoCountActive, setAutoCountActive] = useState(false); // Auto counting state
   const [countSpeed, setCountSpeed] = useState(3); // Seconds between counts
@@ -536,6 +404,21 @@ function WorkoutScreenInner() {
   const autoCountBaseRepRef = useRef<number>(0);
   const autoCountTargetRef = useRef<number>(0);
   const silentSoundRef = useRef<any>(null);
+
+  // Audio coaching state
+  const [coachingActive, setCoachingActive] = useState(false);
+  const [coachingTimeline, setCoachingTimeline] = useState<any>(null);
+  const [coachingTimestamps, setCoachingTimestamps] = useState<number[]>([]);
+  const [coachingEventIdx, setCoachingEventIdx] = useState(0);
+  const [coachingElapsed, setCoachingElapsed] = useState(0);
+  const coachingPlayingRef = useRef(false);
+  const coachingAbortRef = useRef(false);
+  const coachingEventIdxRef = useRef(0);
+  const coachingElapsedRef = useRef(0);
+  const coachingStartedAtRef = useRef(0);
+  const coachingActiveSoundRef = useRef<any>(null);
+  const coachingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const exerciseStartAtRef = useRef<number>(0); // wall clock: 운동 타이머 시작 시각
   const restEndAtRef = useRef<number>(0);       // wall clock: 휴식 종료 예정 시각
   const interstitialRef = useRef<any>(null);
@@ -579,6 +462,206 @@ function WorkoutScreenInner() {
     setAddSearchQuery('');
   };
 
+  // === Audio Coaching Engine ===
+  const coachingWaitMs = (ms: number): Promise<void> => {
+    return new Promise((resolve) => {
+      if (ms <= 0 || coachingAbortRef.current) { resolve(); return; }
+      const silentSound = silentSoundRef.current;
+      if (!silentSound) {
+        coachingTimeoutRef.current = setTimeout(resolve, ms);
+        return;
+      }
+      let resolved = false;
+      const deadline = Date.now() + ms;
+      const check = () => {
+        if (resolved) return;
+        if (Date.now() >= deadline || coachingAbortRef.current) {
+          resolved = true;
+          silentSound.setOnPlaybackStatusUpdate(null);
+          resolve();
+        }
+      };
+      silentSound.setOnPlaybackStatusUpdate(check);
+      coachingTimeoutRef.current = setTimeout(() => {
+        if (!resolved) { resolved = true; silentSound.setOnPlaybackStatusUpdate(null); resolve(); }
+      }, ms + 3000);
+    });
+  };
+
+  const coachingPlaySound = async (source: any): Promise<void> => {
+    if (!Audio?.Sound) return;
+    try {
+      if (coachingActiveSoundRef.current) {
+        await coachingActiveSoundRef.current.stopAsync().catch(() => {});
+        await coachingActiveSoundRef.current.unloadAsync().catch(() => {});
+      }
+      const { sound } = await Audio.Sound.createAsync(source, { volume: 1.0 });
+      coachingActiveSoundRef.current = sound;
+      await sound.playAsync();
+      await new Promise<void>((resolve) => {
+        sound.setOnPlaybackStatusUpdate((status: any) => {
+          if (status?.didJustFinish) {
+            sound.unloadAsync().catch(() => {});
+            if (coachingActiveSoundRef.current === sound) coachingActiveSoundRef.current = null;
+            resolve();
+          }
+        });
+        setTimeout(resolve, 3000);
+      });
+    } catch {}
+  };
+
+  const coachingSpeakAsync = (text: string, durationMs: number): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      try {
+        Speech?.speak(text, { language: 'ko-KR', rate: 0.9, pitch: 1.0, onDone: resolve, onError: resolve });
+      } catch { resolve(); }
+      setTimeout(resolve, durationMs + 500);
+    });
+  };
+
+  const coachingPlayFromIndex = async (timeline: any, timestamps: number[], startIdx: number) => {
+    coachingAbortRef.current = false;
+    coachingPlayingRef.current = true;
+    setCoachingActive(true);
+
+    // Start silent loop for background keepalive
+    if (!silentSoundRef.current && Audio?.Sound) {
+      try {
+        const { sound } = await Audio.Sound.createAsync(
+          COUNT_SOUND_SOURCES[1], { isLooping: true, volume: 0.001 }
+        );
+        await sound.setProgressUpdateIntervalAsync(200);
+        silentSoundRef.current = sound;
+        await sound.playAsync();
+      } catch {}
+    }
+
+    for (let i = startIdx; i < timeline.events.length; i++) {
+      if (coachingAbortRef.current || !coachingPlayingRef.current) break;
+
+      coachingEventIdxRef.current = i;
+      setCoachingEventIdx(i);
+      coachingStartedAtRef.current = Date.now();
+
+      const event = timeline.events[i];
+
+      // Sync workout screen state from event metadata
+      if (event.meta) {
+        if (event.meta.exerciseIndex !== undefined) {
+          setCurrentExIndex(event.meta.exerciseIndex);
+        }
+        if (event.meta.setIndex !== undefined) {
+          setCurrentSet(event.meta.setIndex);
+          setRepCount(0);
+        }
+        if (event.meta.phase === 'exercise') {
+          exerciseStartAtRef.current = Date.now();
+          setPhase('exercise');
+        }
+        if (event.meta.phase === 'rest') {
+          setPhase('rest');
+        }
+      }
+
+      // Play the event
+      switch (event.type) {
+        case 'sound': {
+          const source = getSoundSource(event.payload);
+          if (source) await coachingPlaySound(source);
+          else await coachingWaitMs(event.durationMs);
+          break;
+        }
+        case 'speech':
+          await coachingSpeakAsync(event.payload, event.durationMs);
+          break;
+        case 'silence':
+          await coachingWaitMs(event.durationMs);
+          break;
+      }
+
+      coachingElapsedRef.current = timestamps[i] + event.durationMs;
+      setCoachingElapsed(coachingElapsedRef.current);
+    }
+
+    // Playback complete
+    if (!coachingAbortRef.current) {
+      coachingPlayingRef.current = false;
+      setCoachingActive(false);
+      handleWorkoutComplete();
+    }
+  };
+
+  const startCoaching = () => {
+    if (!plan || !generateCoachingTimeline) return;
+    const timeline = generateCoachingTimeline(plan, { countSpeedSec: countSpeed });
+    const ts = getEventTimestamps(timeline.events);
+    setCoachingTimeline(timeline);
+    setCoachingTimestamps(ts);
+    setCoachingElapsed(0);
+    setCoachingEventIdx(0);
+
+    // Start workout
+    exerciseStartAtRef.current = Date.now();
+    restEndAtRef.current = 0;
+    setPhase('exercise');
+    setCurrentExIndex(0);
+    setCurrentSet(0);
+    setTimer(0);
+    setRepCount(0);
+    setIsTimerRunning(true);
+
+    coachingPlayFromIndex(timeline, ts, 0);
+  };
+
+  const stopCoaching = () => {
+    coachingPlayingRef.current = false;
+    coachingAbortRef.current = true;
+    setCoachingActive(false);
+    if (coachingTimeoutRef.current) { clearTimeout(coachingTimeoutRef.current); }
+    if (coachingActiveSoundRef.current) {
+      coachingActiveSoundRef.current.stopAsync().catch(() => {});
+      coachingActiveSoundRef.current.unloadAsync().catch(() => {});
+      coachingActiveSoundRef.current = null;
+    }
+    if (silentSoundRef.current) {
+      silentSoundRef.current.setOnPlaybackStatusUpdate(null);
+    }
+    try { Speech?.stop(); } catch {}
+  };
+
+  const coachingSkipForward = () => {
+    if (!coachingTimeline) return;
+    const startSearch = coachingEventIdxRef.current + 1;
+    for (let i = startSearch; i < coachingTimeline.events.length; i++) {
+      const ev = coachingTimeline.events[i];
+      if (ev.meta?.phase === 'transition' && ev.meta?.exerciseName) {
+        stopCoaching();
+        coachingElapsedRef.current = coachingTimestamps[i];
+        setCoachingElapsed(coachingTimestamps[i]);
+        setCoachingEventIdx(i);
+        setTimeout(() => coachingPlayFromIndex(coachingTimeline, coachingTimestamps, i), 100);
+        return;
+      }
+    }
+  };
+
+  const coachingSkipBackward = () => {
+    if (!coachingTimeline) return;
+    const searchFrom = coachingEventIdxRef.current - 1;
+    for (let i = searchFrom; i >= 0; i--) {
+      const ev = coachingTimeline.events[i];
+      if (ev.meta?.phase === 'transition' && ev.meta?.exerciseName) {
+        stopCoaching();
+        coachingElapsedRef.current = coachingTimestamps[i];
+        setCoachingElapsed(coachingTimestamps[i]);
+        setCoachingEventIdx(i);
+        setTimeout(() => coachingPlayFromIndex(coachingTimeline, coachingTimestamps, i), 100);
+        return;
+      }
+    }
+  };
+
   // 운동 중 종료 확인 다이얼로그
   const confirmExit = useCallback(() => {
     if (phase === 'exercise' || phase === 'rest') {
@@ -591,6 +674,7 @@ function WorkoutScreenInner() {
             text: '종료',
             style: 'destructive',
             onPress: () => {
+              stopCoaching();
               dismissWorkoutNotification();
               router.back();
             },
@@ -658,6 +742,15 @@ function WorkoutScreenInner() {
         clearInterval(timedSetRef.current);
         timedSetRef.current = null;
       }
+      // Coaching cleanup
+      coachingAbortRef.current = true;
+      coachingPlayingRef.current = false;
+      if (coachingTimeoutRef.current) clearTimeout(coachingTimeoutRef.current);
+      if (coachingActiveSoundRef.current) {
+        coachingActiveSoundRef.current.stopAsync().catch(() => {});
+        coachingActiveSoundRef.current.unloadAsync().catch(() => {});
+      }
+      try { Speech?.stop(); } catch {}
       dismissWorkoutNotification();
     };
   }, []);
@@ -780,7 +873,6 @@ function WorkoutScreenInner() {
   useEffect(() => {
     const useNativeAutoCount =
       Platform.OS === 'android' &&
-      voiceOnlyMode &&
       voiceEnabled &&
       typeof AudioService?.startAutoCount === 'function' &&
       typeof AudioService?.stopAutoCount === 'function';
@@ -852,7 +944,7 @@ function WorkoutScreenInner() {
         } catch (e) {}
       }
     };
-  }, [autoCountActive, voiceEnabled, phase, countSpeed, currentExIndex, currentSet, voiceOnlyMode]);
+  }, [autoCountActive, voiceEnabled, phase, countSpeed, currentExIndex, currentSet]);
 
   // Fetch exercise media from ExerciseDB when exercise changes
   useEffect(() => {
@@ -957,28 +1049,6 @@ function WorkoutScreenInner() {
     return () => sub.remove();
   }, [isTimerRunning, phase, voiceEnabled]);
 
-  // 음성 전용 모드: 운동 종목 전환 시 종목명 TTS 읽기
-  // currentExIndex 또는 phase 변경 시 (rest→exercise) 종목명 발화
-  useEffect(() => {
-    if (phase !== 'exercise') return;
-    if (!voiceOnlyMode) return;
-    if (!plan) return;
-    const exName = plan.exercises[currentExIndex]?.exercise?.name;
-    if (!exName) return;
-    // go 사운드 재생 후 600ms 뒤에 종목명 발화
-    const t = setTimeout(() => speak(exName), 600);
-    return () => clearTimeout(t);
-  }, [currentExIndex, phase, voiceOnlyMode]);
-
-  // 음성 전용 모드: 화면은 항상 켜진 채 유지 (잠금 오버레이로 대체)
-  // 화면을 실제로 끄면 Android가 JS/오디오를 중단시킬 수 있음
-  useEffect(() => {
-    try {
-      const kaw = require('expo-keep-awake');
-      kaw.activateKeepAwakeAsync?.().catch(() => {});
-    } catch (e) {}
-  }, [voiceOnlyMode]);
-
   if (!plan || !profile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1075,10 +1145,6 @@ function WorkoutScreenInner() {
       if (voiceEnabled) {
         playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
         setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
-      }
-      // 음성 전용 모드: 휴식 중 다음 운동 종목명 안내
-      if (voiceOnlyMode) {
-        setTimeout(() => speak(`다음 운동: ${nextEx.name}`), 1800);
       }
     } else {
       const sessionMinutes = Math.floor((Date.now() - startTime) / 60000);
@@ -1401,29 +1467,19 @@ function WorkoutScreenInner() {
             ))}
           </View>
 
-          {/* 음성 전용 모드 토글 */}
+          {/* 오디오 코칭 모드 */}
           <TouchableOpacity
-            style={[styles.voiceOnlyToggle, voiceOnlyMode && styles.voiceOnlyToggleActive]}
-            onPress={() => {
-              const next = !voiceOnlyMode;
-              setVoiceOnlyMode(next);
-              if (next) setVoiceEnabled(true); // 음성 전용 활성화 시 음성도 자동 ON
-            }}
+            style={styles.coachingToggle}
+            onPress={() => startCoaching()}
           >
-            <Text style={styles.voiceOnlyToggleIcon}>{voiceOnlyMode ? '🎧' : '🔇'}</Text>
+            <Text style={styles.coachingToggleIcon}>🎧</Text>
             <View style={{ flex: 1 }}>
-              <Text style={styles.voiceOnlyToggleTitle}>
-                {voiceOnlyMode ? '음성 전용 모드 ON' : '음성 전용 모드 OFF'}
-              </Text>
-              <Text style={styles.voiceOnlyToggleDesc}>
-                {voiceOnlyMode
-                  ? '화면 꺼짐 허용 · 종목명 자동 읽기'
-                  : '켜면 화면이 꺼져도 운동 안내 음성이 나옵니다'}
+              <Text style={styles.coachingToggleTitle}>오디오 코칭으로 시작</Text>
+              <Text style={styles.coachingToggleDesc}>
+                종목·카운트·휴식을 자동 안내합니다. 잠금화면에서도 재생!
               </Text>
             </View>
-            <View style={[styles.voiceOnlyToggleSwitch, voiceOnlyMode && styles.voiceOnlyToggleSwitchOn]}>
-              <View style={[styles.voiceOnlyToggleThumb, voiceOnlyMode && styles.voiceOnlyToggleThumbOn]} />
-            </View>
+            <Text style={{ color: Colors.primary, fontSize: FontSize.lg }}>▶</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.startBtn} onPress={handleStartWorkout}>
@@ -1531,39 +1587,6 @@ function WorkoutScreenInner() {
 
     return (
       <SafeAreaView style={[styles.container, { position: 'relative' }]}>
-        {/* 잠금 화면 오버레이 — voiceOnlyMode 활성 시 표시 */}
-        {voiceOnlyMode && (
-          <WorkoutLockScreen
-            startTimestamp={startTime}
-            exerciseName={ex.name}
-            progress={`${currentExIndex + 1} / ${totalExercises}`}
-            restTime={restTime}
-            phase={phase}
-            onUnlock={() => setVoiceOnlyMode(false)}
-            onPrev={() => {
-              if (currentExIndex > 0) {
-                restEndAtRef.current = 0;
-                exerciseStartAtRef.current = Date.now();
-                setCurrentExIndex(currentExIndex - 1);
-                setCurrentSet(0);
-                setTimer(0);
-                setRepCount(0);
-              }
-            }}
-            onNext={() => {
-              if (currentExIndex < totalExercises - 1) {
-                restEndAtRef.current = 0;
-                exerciseStartAtRef.current = Date.now();
-                setCurrentExIndex(currentExIndex + 1);
-                setCurrentSet(0);
-                setTimer(0);
-                setRepCount(0);
-              } else {
-                handleWorkoutComplete();
-              }
-            }}
-          />
-        )}
         <View style={styles.exercisePhase}>
           {/* Top bar */}
           <View style={styles.topBar}>
@@ -1572,17 +1595,6 @@ function WorkoutScreenInner() {
             </TouchableOpacity>
             <Text style={styles.topBarProgress}>{currentExIndex + 1} / {totalExercises}</Text>
             <Text style={styles.timerText}>{formatTime(timer)}</Text>
-            {/* 잠금 아이콘 버튼 (음성 전용 잠금모드) */}
-            <TouchableOpacity
-              style={[styles.lockBtn, voiceOnlyMode && styles.lockBtnActive]}
-              onPress={() => {
-                const next = !voiceOnlyMode;
-                setVoiceOnlyMode(next);
-                if (next) setVoiceEnabled(true);
-              }}
-            >
-              <Text style={styles.lockBtnText}>{voiceOnlyMode ? '🔒' : '🔓'}</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Progress */}
@@ -1797,54 +1809,79 @@ function WorkoutScreenInner() {
           )}
 
           {/* Bottom: 수동 넘김(자동 진행 보조) + 하단 네비게이션 */}
-          <View style={styles.bottomBtns}>
-            {/* 이전 운동으로 */}
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={() => {
-                if (currentExIndex > 0) {
-                  restEndAtRef.current = 0;
-                  exerciseStartAtRef.current = Date.now();
-                  setCurrentExIndex(currentExIndex - 1);
-                  setCurrentSet(0);
-                  setTimer(0);
-                  setRepCount(0);
-                }
-              }}
-            >
-              <Text style={styles.navBtnText}>⏮</Text>
-            </TouchableOpacity>
+          {!coachingActive && (
+            <View style={styles.bottomBtns}>
+              {/* 이전 운동으로 */}
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => {
+                  if (currentExIndex > 0) {
+                    restEndAtRef.current = 0;
+                    exerciseStartAtRef.current = Date.now();
+                    setCurrentExIndex(currentExIndex - 1);
+                    setCurrentSet(0);
+                    setTimer(0);
+                    setRepCount(0);
+                  }
+                }}
+              >
+                <Text style={styles.navBtnText}>⏮</Text>
+              </TouchableOpacity>
 
-            {/* 즉시 다음 단계로 수동 진행 */}
-            <TouchableOpacity style={styles.setCompleteBtn} onPress={handleSetComplete}>
-              <Text style={styles.setCompleteBtnText}>
-                {currentSet < currentPlanItem.setDetails.length - 1
-                  ? '즉시 다음 세트'
-                  : currentExIndex < totalExercises - 1
-                    ? '즉시 다음 운동 →'
-                    : '운동 완료! 🎉'}
+              {/* 즉시 다음 단계로 수동 진행 */}
+              <TouchableOpacity style={styles.setCompleteBtn} onPress={handleSetComplete}>
+                <Text style={styles.setCompleteBtnText}>
+                  {currentSet < currentPlanItem.setDetails.length - 1
+                    ? '즉시 다음 세트'
+                    : currentExIndex < totalExercises - 1
+                      ? '즉시 다음 운동 →'
+                      : '운동 완료! 🎉'}
+                </Text>
+              </TouchableOpacity>
+
+              {/* 다음 운동으로 건너뛰기 */}
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => {
+                  if (currentExIndex < totalExercises - 1) {
+                    restEndAtRef.current = 0;
+                    exerciseStartAtRef.current = Date.now();
+                    setCurrentExIndex(currentExIndex + 1);
+                    setCurrentSet(0);
+                    setTimer(0);
+                    setRepCount(0);
+                  } else {
+                    handleWorkoutComplete();
+                  }
+                }}
+              >
+                <Text style={styles.navBtnText}>⏭</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Coaching control bar */}
+          {coachingActive && (
+            <View style={styles.coachingBar}>
+              <TouchableOpacity onPress={coachingSkipBackward}>
+                <Text style={styles.coachingBarBtn}>⏮</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={stopCoaching}>
+                <Text style={styles.coachingBarBtn}>⏸</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={coachingSkipForward}>
+                <Text style={styles.coachingBarBtn}>⏭</Text>
+              </TouchableOpacity>
+              <View style={styles.coachingBarProgress}>
+                <View style={[styles.coachingBarFill, {
+                  width: `${coachingTimeline ? (coachingElapsed / coachingTimeline.totalDurationMs * 100) : 0}%`
+                }]} />
+              </View>
+              <Text style={styles.coachingBarTime}>
+                {Math.floor(coachingElapsed / 60000)}:{String(Math.floor((coachingElapsed % 60000) / 1000)).padStart(2, '0')}
               </Text>
-            </TouchableOpacity>
-
-            {/* 다음 운동으로 건너뛰기 */}
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={() => {
-                if (currentExIndex < totalExercises - 1) {
-                  restEndAtRef.current = 0;
-                  exerciseStartAtRef.current = Date.now();
-                  setCurrentExIndex(currentExIndex + 1);
-                  setCurrentSet(0);
-                  setTimer(0);
-                  setRepCount(0);
-                } else {
-                  handleWorkoutComplete();
-                }
-              }}
-            >
-              <Text style={styles.navBtnText}>⏭</Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -1858,29 +1895,6 @@ function WorkoutScreenInner() {
 
     return (
       <SafeAreaView style={[styles.container, { position: 'relative' }]}>
-        {/* 휴식 중 잠금 오버레이 */}
-        {voiceOnlyMode && (
-          <WorkoutLockScreen
-            startTimestamp={startTime}
-            exerciseName={nextEx?.exercise.name ?? ''}
-            progress={`${currentExIndex + 1} / ${totalExercises}`}
-            restTime={restTime}
-            phase="rest"
-            onUnlock={() => setVoiceOnlyMode(false)}
-            onPrev={() => {
-              if (currentExIndex > 0) {
-                restEndAtRef.current = 0;
-                exerciseStartAtRef.current = Date.now();
-                setCurrentExIndex(currentExIndex - 1);
-                setCurrentSet(0);
-                setTimer(0);
-                setRepCount(0);
-                setPhase('exercise');
-              }
-            }}
-            onNext={handleSkipRest}
-          />
-        )}
         <View style={styles.restContainer}>
           <TouchableOpacity onPress={confirmExit} style={{ position: 'absolute', top: 0, left: Spacing.lg }}>
             <Text style={styles.backButton}>←</Text>
@@ -1895,14 +1909,41 @@ function WorkoutScreenInner() {
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.skipRestBtn} onPress={handleSkipRest}>
-            <Text style={styles.skipRestBtnText}>휴식 건너뛰기 →</Text>
-          </TouchableOpacity>
+          {!coachingActive && (
+            <TouchableOpacity style={styles.skipRestBtn} onPress={handleSkipRest}>
+              <Text style={styles.skipRestBtnText}>휴식 건너뛰기 →</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Ad placeholder */}
-          <View style={styles.adPlaceholder}>
-            <Text style={styles.adText}>📢 광고 영역 (구독 시 제거)</Text>
-          </View>
+          {!coachingActive && (
+            <View style={styles.adPlaceholder}>
+              <Text style={styles.adText}>📢 광고 영역 (구독 시 제거)</Text>
+            </View>
+          )}
+
+          {/* Coaching control bar */}
+          {coachingActive && (
+            <View style={[styles.coachingBar, { position: 'relative', marginTop: Spacing.lg, width: '100%' }]}>
+              <TouchableOpacity onPress={coachingSkipBackward}>
+                <Text style={styles.coachingBarBtn}>⏮</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={stopCoaching}>
+                <Text style={styles.coachingBarBtn}>⏸</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={coachingSkipForward}>
+                <Text style={styles.coachingBarBtn}>⏭</Text>
+              </TouchableOpacity>
+              <View style={styles.coachingBarProgress}>
+                <View style={[styles.coachingBarFill, {
+                  width: `${coachingTimeline ? (coachingElapsed / coachingTimeline.totalDurationMs * 100) : 0}%`
+                }]} />
+              </View>
+              <Text style={styles.coachingBarTime}>
+                {Math.floor(coachingElapsed / 60000)}:{String(Math.floor((coachingElapsed % 60000) / 1000)).padStart(2, '0')}
+              </Text>
+            </View>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -2207,31 +2248,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
 
-  // 음성 전용 모드 토글 (Preview 화면)
-  voiceOnlyToggle: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
-    backgroundColor: Colors.card, borderRadius: BorderRadius.md,
-    padding: Spacing.md, borderWidth: 1, borderColor: Colors.cardBorder,
-  },
-  voiceOnlyToggleActive: {
-    borderColor: Colors.primary, backgroundColor: 'rgba(78,238,176,0.08)',
-  },
-  voiceOnlyToggleIcon: { fontSize: 24 },
-  voiceOnlyToggleTitle: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '700' },
-  voiceOnlyToggleDesc: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2 },
-  voiceOnlyToggleSwitch: {
-    width: 44, height: 24, borderRadius: 12, backgroundColor: Colors.surface,
-    justifyContent: 'center', paddingHorizontal: 2,
-  },
-  voiceOnlyToggleSwitchOn: { backgroundColor: Colors.primary },
-  voiceOnlyToggleThumb: {
-    width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.textMuted,
-  },
-  voiceOnlyToggleThumbOn: {
-    backgroundColor: Colors.background, marginLeft: 20,
-  },
-
   startBtn: {
     marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
     backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
@@ -2244,16 +2260,6 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   topBarProgress: { color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: '600', flex: 1 },
   timerText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
-  // 잠금 아이콘 버튼
-  lockBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: Colors.surface,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  lockBtnActive: {
-    backgroundColor: Colors.primary,
-  },
-  lockBtnText: { fontSize: 18 },
   progressBarBg: {
     height: 4, backgroundColor: Colors.surface, borderRadius: 2, marginTop: Spacing.sm,
   },
@@ -2500,4 +2506,39 @@ const styles = StyleSheet.create({
   swapEmoji: { fontSize: 24 },
   swapName: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
   swapDetail: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
+
+  // Coaching toggle (preview)
+  coachingToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A2A1A',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: '#2A3A2A',
+    gap: Spacing.sm,
+  },
+  coachingToggleIcon: { fontSize: 28 },
+  coachingToggleTitle: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
+  coachingToggleDesc: { color: Colors.textMuted, fontSize: FontSize.xs, marginTop: 2 },
+
+  // Coaching bar (exercise/rest bottom)
+  coachingBar: {
+    backgroundColor: '#1A1A1A',
+    borderTopWidth: 1,
+    borderTopColor: '#2A2A2A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  coachingBarBtn: { fontSize: 20, color: Colors.text, padding: Spacing.xs },
+  coachingBarProgress: { flex: 1, height: 3, backgroundColor: '#2A2A2A', borderRadius: 2 },
+  coachingBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 2 },
+  coachingBarTime: { color: Colors.textMuted, fontSize: FontSize.xs, fontVariant: ['tabular-nums'] },
 });
