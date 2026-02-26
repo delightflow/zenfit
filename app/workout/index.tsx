@@ -442,6 +442,8 @@ function WorkoutScreenInner() {
   // 분할 선택 시 결정적 플랜 생성 (저장된 운동 + 무게 사용)
   const handleSelectSplit = (split: 'A' | 'B' | 'C') => {
     if (!profile || !generateSplitPlan) return;
+    // 이미 선택된 분할이면 운동 목록 유지 (재생성 방지)
+    if (activeSplit === split && plan) return;
     try {
       const goal = profile.goal || 'maintain';
       const experience = profile.experience || 'beginner';
@@ -703,9 +705,21 @@ function WorkoutScreenInner() {
   const coachingSkipForward = () => {
     if (!coachingTimeline) return;
     const startSearch = coachingEventIdxRef.current + 1;
+    // 현재 이벤트의 세트/운동 인덱스 파악
+    const currentEv = coachingTimeline.events[coachingEventIdxRef.current];
+    const currentSetIdx = currentEv?.meta?.setIndex;
+    const currentExIdx = currentEv?.meta?.exerciseIndex;
+
     for (let i = startSearch; i < coachingTimeline.events.length; i++) {
       const ev = coachingTimeline.events[i];
-      if (ev.meta?.phase === 'transition' && ev.meta?.exerciseName) {
+      // 다음 세트 시작 (같은 운동의 다음 세트 or 다음 운동 첫 세트)
+      const isDifferentSet =
+        ev.meta?.setIndex !== undefined &&
+        (ev.meta?.setIndex !== currentSetIdx || ev.meta?.exerciseIndex !== currentExIdx);
+      // 다음 운동 전환 이벤트 (모든 세트 완료 후)
+      const isNextExerciseTransition = ev.meta?.phase === 'transition' && ev.meta?.exerciseName;
+
+      if (isDifferentSet || isNextExerciseTransition) {
         stopCoaching();
         coachingElapsedRef.current = coachingTimestamps[i];
         setCoachingElapsed(coachingTimestamps[i]);
@@ -1202,7 +1216,6 @@ function WorkoutScreenInner() {
       setRestTime(currentPlanItem.restSeconds);
       setPhase('rest');
       setIsTimerRunning(true);
-      if (!coachingActive) showInterstitialIfReady(); // 휴식시간 광고
       if (voiceEnabled && !coachingActive) {
         playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
         setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
@@ -1217,7 +1230,6 @@ function WorkoutScreenInner() {
       setRestTime(currentPlanItem.restSeconds + EXERCISE_PREP_SECONDS);
       setPhase('rest');
       setIsTimerRunning(true);
-      if (!coachingActive) showInterstitialIfReady(); // 운동 간 휴식시간 광고
       if (voiceEnabled && !coachingActive) {
         playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
         setTimeout(() => playCountAudio(PHRASE_SOUND_SOURCES.rest), 1200);
@@ -1476,18 +1488,16 @@ function WorkoutScreenInner() {
 
                     {isWeighted ? (
                       <>
-                        {/* Weight */}
+                        {/* Weight - 직접 입력 */}
                         <View style={styles.setValueGroup}>
-                          <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(exIdx, setIdx, -2.5)}>
-                            <Text style={styles.miniBtnText}>-</Text>
-                          </TouchableOpacity>
-                          <View style={styles.setValueBox}>
-                            <Text style={styles.setValueNum}>{sd.weight}</Text>
-                            <Text style={styles.setValueUnit}>kg</Text>
-                          </View>
-                          <TouchableOpacity style={styles.miniBtn} onPress={() => handleUpdateSetWeight(exIdx, setIdx, 2.5)}>
-                            <Text style={styles.miniBtnText}>+</Text>
-                          </TouchableOpacity>
+                          <TextInput
+                            style={styles.repsInput}
+                            value={String(sd.weight)}
+                            onChangeText={(v) => handleSetWeightInput(exIdx, setIdx, v)}
+                            keyboardType="numeric"
+                            selectTextOnFocus
+                          />
+                          <Text style={styles.setValueUnit}>kg</Text>
                         </View>
 
                         <Text style={styles.setDivider}>/</Text>
