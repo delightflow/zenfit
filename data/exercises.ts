@@ -2051,6 +2051,29 @@ export function getNextSplit(lastSplit: string | null): 'A' | 'B' | 'C' {
   return 'A';
 }
 
+// ===== 기본 무게 추천 알고리즘 =====
+
+export function getDefaultWeight(
+  exercise: Exercise,
+  experience: 'beginner' | 'intermediate' | 'advanced' = 'beginner'
+): number {
+  if (['bodyweight', 'none', 'band'].includes(exercise.equipment)) return 0;
+
+  // 장비 × 부위별 초보자 기준 무게 (kg)
+  const baseWeights: Record<string, Partial<Record<BodyPart, number>>> = {
+    barbell: { chest: 30, back: 35, legs: 40, shoulder: 20, arms: 20, core: 20, cardio: 0 },
+    dumbbell: { chest: 10, back: 10, legs: 12, shoulder: 7, arms: 8, core: 8, cardio: 0 },
+    machine: { chest: 25, back: 30, legs: 40, shoulder: 15, arms: 15, core: 15, cardio: 0 },
+    cable:   { chest: 15, back: 20, legs: 25, shoulder: 12, arms: 12, core: 12, cardio: 0 },
+  };
+
+  const expMultiplier = experience === 'intermediate' ? 1.3 : experience === 'advanced' ? 1.6 : 1.0;
+  const equipBase = baseWeights[exercise.equipment] ?? {};
+  const base = equipBase[exercise.bodyPart] ?? 15;
+  const raw = base * expMultiplier;
+  return Math.round(raw / 2.5) * 2.5; // 2.5kg 단위 반올림
+}
+
 // ===== 운동 프로그램 생성 =====
 
 export interface SetDetail {
@@ -2114,7 +2137,7 @@ export function generateWorkoutPlan(
       }
     }
 
-    const defaultWeight = exercise.equipment === 'bodyweight' ? 0 : 20; // Default 20kg for weighted exercises
+    const defaultWeight = getDefaultWeight(exercise, experience);
     const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({
       weight: defaultWeight,
       reps,
@@ -2227,9 +2250,9 @@ export function generateSplitPlan(
       }
     }
 
-    // 저장된 무게 또는 기본 무게
+    // 저장된 무게 또는 스마트 기본 무게
     const savedWeight = options.savedWeights?.[exercise.id];
-    const defaultWeight = exercise.equipment === 'bodyweight' ? 0 : 20;
+    const defaultWeight = getDefaultWeight(exercise, experience);
     const weight = savedWeight ?? defaultWeight;
 
     const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({

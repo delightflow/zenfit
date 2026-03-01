@@ -34,13 +34,14 @@ try {
 }
 
 let generateWorkoutPlan: any, generateSplitPlan: any, getRecommendedParts: any, getNextSplit: any, allExercises: any;
-let BODY_PART_LABELS: any, BODY_PART_EMOJI: any, SPLIT_DEFS: any;
+let BODY_PART_LABELS: any, BODY_PART_EMOJI: any, SPLIT_DEFS: any, getDefaultWeight: any;
 try {
   const data = require('../../data/exercises');
   generateWorkoutPlan = data.generateWorkoutPlan;
   generateSplitPlan = data.generateSplitPlan;
   getRecommendedParts = data.getRecommendedParts;
   getNextSplit = data.getNextSplit;
+  getDefaultWeight = data.getDefaultWeight;
   allExercises = data.exercises;
   BODY_PART_LABELS = data.BODY_PART_LABELS;
   BODY_PART_EMOJI = data.BODY_PART_EMOJI;
@@ -467,7 +468,8 @@ function WorkoutScreenInner() {
   // 운동 추가 핸들러
   const handleAddExercise = (ex: any) => {
     if (!plan) return;
-    const defaultWeight = ex.equipment === 'bodyweight' ? 0 : 20;
+    const savedWeight = exerciseWeights?.[ex.id];
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(ex, profile?.experience || 'beginner') : (ex.equipment === 'bodyweight' ? 0 : 20));
     const newItem = {
       exercise: ex,
       setDetails: Array.from({ length: ex.defaultSets }, () => ({ weight: defaultWeight, reps: ex.defaultReps })),
@@ -1050,25 +1052,32 @@ function WorkoutScreenInner() {
     });
   }, [currentExIndex, phase, plan]);
 
-  // Generate workout plan
+  // Generate workout plan (A/B/C 스플릿 기반 - 화면 목록과 운동 시작이 일치하도록)
   useEffect(() => {
     if (!profile) {
       setPlanError(`프로필이 없습니다. 온보딩을 다시 진행해주세요.`);
       return;
     }
     try {
-      const dayOfWeek = new Date().getDay();
       const goal = profile.goal || 'maintain';
       const experience = profile.experience || 'beginner';
-      const parts = getRecommendedParts(dayOfWeek, goal);
-      console.log('[ZenFit] Plan generation:', { dayOfWeek, goal, experience, parts, profileKeys: Object.keys(profile) });
-      const workout = generateWorkoutPlan(goal, experience, parts);
+      // 마지막 완료한 분할의 다음 분할을 자동 선택
+      const nextSplit = (getNextSplit(lastSplit) || 'A') as 'A' | 'B' | 'C';
+      const savedIds = splitPlans?.[nextSplit];
+      console.log('[ZenFit] Split plan init:', { goal, experience, nextSplit, lastSplit, savedIds });
+      const workout = generateSplitPlan(goal, experience, nextSplit, {
+        savedExerciseIds: savedIds,
+        savedWeights: exerciseWeights,
+        blacklist: blacklistedExercises,
+      });
       console.log('[ZenFit] Plan result:', { exerciseCount: workout?.exercises?.length, name: workout?.name });
       if (workout && workout.exercises && workout.exercises.length > 0) {
         setPlan(workout);
+        setActiveSplit(nextSplit);
+        setSplitPlanStore(nextSplit, workout.exercises.map((e: any) => e.exercise.id));
         setPlanError(null);
       } else {
-        setPlanError(`운동 플랜이 비어있습니다. (goal=${goal}, exp=${experience}, parts=${parts.join(',')})`);
+        setPlanError(`운동 플랜이 비어있습니다. (goal=${goal}, exp=${experience}, split=${nextSplit})`);
       }
     } catch (e: any) {
       console.error('[ZenFit] Plan error:', e);
@@ -1318,7 +1327,8 @@ function WorkoutScreenInner() {
   const handleSwapExercise = (newEx: Exercise) => {
     if (!plan || swapIndex === null) return;
     const old = plan.exercises[swapIndex];
-    const defaultWeight = newEx.equipment === 'bodyweight' ? 0 : 20;
+    const savedWeight = exerciseWeights?.[newEx.id];
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(newEx, profile?.experience || 'beginner') : (newEx.equipment === 'bodyweight' ? 0 : 20));
     const newSetDetails: SetDetail[] = Array.from({ length: newEx.defaultSets }, () => ({
       weight: defaultWeight,
       reps: newEx.defaultReps,
