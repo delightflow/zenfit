@@ -2055,9 +2055,28 @@ export function getNextSplit(lastSplit: string | null): 'A' | 'B' | 'C' {
 
 export function getDefaultWeight(
   exercise: Exercise,
-  experience: 'beginner' | 'intermediate' | 'advanced' = 'beginner'
+  experience: 'beginner' | 'intermediate' | 'advanced' = 'beginner',
+  oneRM?: { bench: number; squat: number; deadlift: number }
 ): number {
   if (['bodyweight', 'none', 'band'].includes(exercise.equipment)) return 0;
+
+  // 1RM 기반 계산 (1RM의 55%를 작업 무게로)
+  if (oneRM) {
+    const ratio = 0.55;
+    let ref: number | null = null;
+    if (exercise.bodyPart === 'chest' || exercise.bodyPart === 'arms') {
+      ref = oneRM.bench;
+    } else if (exercise.bodyPart === 'legs') {
+      ref = exercise.equipment === 'barbell' ? oneRM.squat : oneRM.squat * 0.4;
+    } else if (exercise.bodyPart === 'back' || exercise.bodyPart === 'core') {
+      ref = oneRM.deadlift * 0.5;
+    } else if (exercise.bodyPart === 'shoulder') {
+      ref = oneRM.bench * 0.45;
+    }
+    if (ref !== null && ref > 0) {
+      return Math.round((ref * ratio) / 2.5) * 2.5;
+    }
+  }
 
   // 장비 × 부위별 초보자 기준 무게 (kg)
   const baseWeights: Record<string, Partial<Record<BodyPart, number>>> = {
@@ -2179,6 +2198,7 @@ export function generateSplitPlan(
     savedExerciseIds?: string[];
     savedWeights?: Record<string, number>;
     blacklist?: string[];
+    oneRM?: { bench: number; squat: number; deadlift: number };
   } = {}
 ): WorkoutPlan {
   const splitDefs = SPLIT_DEFS[goal] || SPLIT_DEFS.maintain;
@@ -2250,9 +2270,9 @@ export function generateSplitPlan(
       }
     }
 
-    // 저장된 무게 또는 스마트 기본 무게
+    // 저장된 무게 또는 스마트 기본 무게 (1RM 기반 우선)
     const savedWeight = options.savedWeights?.[exercise.id];
-    const defaultWeight = getDefaultWeight(exercise, experience);
+    const defaultWeight = getDefaultWeight(exercise, experience, options.oneRM);
     const weight = savedWeight ?? defaultWeight;
 
     const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({

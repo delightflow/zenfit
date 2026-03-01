@@ -453,6 +453,7 @@ function WorkoutScreenInner() {
         savedExerciseIds: savedIds,
         savedWeights: exerciseWeights,
         blacklist: blacklistedExercises,
+        oneRM: profile?.estimatedOneRM,
       });
       if (newPlan && newPlan.exercises.length > 0) {
         setPlan(newPlan);
@@ -469,7 +470,7 @@ function WorkoutScreenInner() {
   const handleAddExercise = (ex: any) => {
     if (!plan) return;
     const savedWeight = exerciseWeights?.[ex.id];
-    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(ex, profile?.experience || 'beginner') : (ex.equipment === 'bodyweight' ? 0 : 20));
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(ex, profile?.experience || 'beginner', profile?.estimatedOneRM) : (ex.equipment === 'bodyweight' ? 0 : 20));
     const newItem = {
       exercise: ex,
       setDetails: Array.from({ length: ex.defaultSets }, () => ({ weight: defaultWeight, reps: ex.defaultReps })),
@@ -1069,6 +1070,7 @@ function WorkoutScreenInner() {
         savedExerciseIds: savedIds,
         savedWeights: exerciseWeights,
         blacklist: blacklistedExercises,
+        oneRM: profile?.estimatedOneRM,
       });
       console.log('[ZenFit] Plan result:', { exerciseCount: workout?.exercises?.length, name: workout?.name });
       if (workout && workout.exercises && workout.exercises.length > 0) {
@@ -1328,7 +1330,7 @@ function WorkoutScreenInner() {
     if (!plan || swapIndex === null) return;
     const old = plan.exercises[swapIndex];
     const savedWeight = exerciseWeights?.[newEx.id];
-    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(newEx, profile?.experience || 'beginner') : (newEx.equipment === 'bodyweight' ? 0 : 20));
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(newEx, profile?.experience || 'beginner', profile?.estimatedOneRM) : (newEx.equipment === 'bodyweight' ? 0 : 20));
     const newSetDetails: SetDetail[] = Array.from({ length: newEx.defaultSets }, () => ({
       weight: defaultWeight,
       reps: newEx.defaultReps,

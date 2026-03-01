@@ -7,9 +7,9 @@ import { useStore, UserProfile } from '../../store/useStore';
 
 const { width } = Dimensions.get('window');
 
-type Step = 'welcome' | 'name' | 'gender' | 'body' | 'goal' | 'focus' | 'experience' | 'schedule' | 'duration' | 'recommend' | 'done';
+type Step = 'welcome' | 'name' | 'gender' | 'body' | 'goal' | 'focus' | 'experience' | 'irm' | 'schedule' | 'duration' | 'recommend' | 'done';
 
-const STEPS: Step[] = ['welcome', 'name', 'gender', 'body', 'goal', 'focus', 'experience', 'schedule', 'duration', 'recommend', 'done'];
+const STEPS: Step[] = ['welcome', 'name', 'gender', 'body', 'goal', 'focus', 'experience', 'irm', 'schedule', 'duration', 'recommend', 'done'];
 
 export default function OnboardingScreen() {
   const setProfile = useStore((s) => s.setProfile);
@@ -27,6 +27,22 @@ export default function OnboardingScreen() {
   const [workoutDays, setWorkoutDays] = useState<number[]>([1, 3, 5]); // Mon, Wed, Fri
   const [workoutFreq, setWorkoutFreq] = useState<number>(3); // 주간 운동 횟수
 
+  // 1RM 입력 (직접 입력 또는 추정값 사용)
+  const [irmBench, setIrmBench] = useState('');
+  const [irmSquat, setIrmSquat] = useState('');
+  const [irmDeadlift, setIrmDeadlift] = useState('');
+
+  // 체중 × 경험수준 기반 1RM 추정값 계산
+  const getEstimatedIRM = () => {
+    const RM_MULT: Record<string, Record<string, { bench: number; squat: number; deadlift: number }>> = {
+      male:   { beginner: { bench: 0.5, squat: 0.75, deadlift: 1.0 }, intermediate: { bench: 1.0, squat: 1.5, deadlift: 2.0 }, advanced: { bench: 1.5, squat: 2.0, deadlift: 2.5 } },
+      female: { beginner: { bench: 0.3, squat: 0.5,  deadlift: 0.65 }, intermediate: { bench: 0.65, squat: 1.0, deadlift: 1.3 }, advanced: { bench: 1.0, squat: 1.3, deadlift: 1.65 } },
+    };
+    const bw = parseInt(weight) || 75;
+    const m = RM_MULT[gender]?.[experience] ?? RM_MULT.male.beginner;
+    return { bench: Math.round(bw * m.bench), squat: Math.round(bw * m.squat), deadlift: Math.round(bw * m.deadlift) };
+  };
+
   const stepIndex = STEPS.indexOf(step);
   const progress = (stepIndex / (STEPS.length - 1)) * 100;
 
@@ -39,24 +55,12 @@ export default function OnboardingScreen() {
     const bw = parseInt(weight) || 75;
     const selectedGoal = GOAL_OPTIONS.find((o) => o.key === goalKey)?.goal ?? goal;
 
-    // 체중 대비 1RM 추정 multiplier (성별 × 경험수준)
-    const RM_MULT: Record<string, Record<string, { bench: number; squat: number; deadlift: number }>> = {
-      male: {
-        beginner:     { bench: 0.5,  squat: 0.75, deadlift: 1.0 },
-        intermediate: { bench: 1.0,  squat: 1.5,  deadlift: 2.0 },
-        advanced:     { bench: 1.5,  squat: 2.0,  deadlift: 2.5 },
-      },
-      female: {
-        beginner:     { bench: 0.3,  squat: 0.5,  deadlift: 0.65 },
-        intermediate: { bench: 0.65, squat: 1.0,  deadlift: 1.3  },
-        advanced:     { bench: 1.0,  squat: 1.3,  deadlift: 1.65 },
-      },
-    };
-    const mult = RM_MULT[gender][experience];
+    // 1RM: 직접 입력값 우선, 없으면 추정값 사용
+    const est = getEstimatedIRM();
     const estimatedOneRM = {
-      bench:    Math.round(bw * mult.bench),
-      squat:    Math.round(bw * mult.squat),
-      deadlift: Math.round(bw * mult.deadlift),
+      bench:    parseInt(irmBench) || est.bench,
+      squat:    parseInt(irmSquat) || est.squat,
+      deadlift: parseInt(irmDeadlift) || est.deadlift,
     };
 
     const profile: UserProfile = {
@@ -339,6 +343,67 @@ export default function OnboardingScreen() {
           </View>
         )}
 
+        {step === 'irm' && (() => {
+          const est = getEstimatedIRM();
+          const irmItems = [
+            { key: 'bench',    label: '벤치프레스', emoji: '🏋️', state: irmBench,    setState: setIrmBench,    est: est.bench },
+            { key: 'squat',    label: '스쿼트',     emoji: '🦵', state: irmSquat,    setState: setIrmSquat,    est: est.squat },
+            { key: 'deadlift', label: '데드리프트', emoji: '💀', state: irmDeadlift, setState: setIrmDeadlift, est: est.deadlift },
+          ];
+          return (
+            <View style={styles.stepContainer}>
+              <Text style={styles.stepEmoji}>💪</Text>
+              <Text style={styles.stepTitle}>1RM을 알고 계신가요?</Text>
+              <Text style={styles.stepSubtitle}>
+                모르시면 비워두세요.{'\n'}추정값으로 무게를 설정해드립니다.
+              </Text>
+              {irmItems.map((item) => (
+                <View key={item.key} style={styles.irmRow}>
+                  <Text style={styles.irmLabel}>{item.emoji} {item.label}</Text>
+                  <View style={styles.irmInputRow}>
+                    <TouchableOpacity
+                      style={styles.irmBtn}
+                      onPress={() => {
+                        const cur = parseInt(item.state) || item.est;
+                        item.setState(String(Math.max(0, cur - 5)));
+                      }}
+                    >
+                      <Text style={styles.irmBtnText}>−</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={styles.irmInput}
+                      keyboardType="numeric"
+                      placeholder={`~${item.est}kg`}
+                      placeholderTextColor={Colors.textMuted}
+                      value={item.state}
+                      onChangeText={item.setState}
+                    />
+                    <TouchableOpacity
+                      style={styles.irmBtn}
+                      onPress={() => {
+                        const cur = parseInt(item.state) || item.est;
+                        item.setState(String(cur + 5));
+                      }}
+                    >
+                      <Text style={styles.irmBtnText}>+</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.irmUnit}>kg</Text>
+                  </View>
+                </View>
+              ))}
+              <Text style={styles.irmHint}>
+                * 1RM = 1회 최대 중량. 자신 없으면 빈칸으로 두세요.
+              </Text>
+              <TouchableOpacity style={[styles.primaryButton, { marginTop: Spacing.lg }]} onPress={next}>
+                <Text style={styles.primaryButtonText}>다음</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={next} style={{ alignItems: 'center', marginTop: Spacing.sm }}>
+                <Text style={{ color: Colors.textMuted, fontSize: FontSize.sm }}>모르겠어요 (추정값 사용)</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })()}
+
         {step === 'schedule' && (
           <View style={styles.stepContainer}>
             <Text style={styles.aiCoachLabel}>AI 코치 플랜 추천</Text>
@@ -490,16 +555,19 @@ export default function OnboardingScreen() {
               <Text style={styles.doneSummaryItem}>📏 {weight}kg → {targetWeight}kg</Text>
               <Text style={styles.doneSummaryItem}>📅 주 {workoutDays.length}회 운동</Text>
               {(() => {
-                const bw = parseInt(weight) || 75;
-                const RM_MULT: Record<string, Record<string, { bench: number; squat: number; deadlift: number }>> = {
-                  male:   { beginner: { bench: 0.5, squat: 0.75, deadlift: 1.0 }, intermediate: { bench: 1.0, squat: 1.5, deadlift: 2.0 }, advanced: { bench: 1.5, squat: 2.0, deadlift: 2.5 } },
-                  female: { beginner: { bench: 0.3, squat: 0.5,  deadlift: 0.65 }, intermediate: { bench: 0.65, squat: 1.0, deadlift: 1.3 }, advanced: { bench: 1.0, squat: 1.3, deadlift: 1.65 } },
-                };
-                const m = RM_MULT[gender][experience];
+                const est = getEstimatedIRM();
+                const bench    = parseInt(irmBench)    || est.bench;
+                const squat    = parseInt(irmSquat)    || est.squat;
+                const deadlift = parseInt(irmDeadlift) || est.deadlift;
+                const isCustom = irmBench || irmSquat || irmDeadlift;
                 return (
                   <>
-                    <Text style={[styles.doneSummaryItem, { marginTop: 8, color: Colors.primary, fontWeight: '700' }]}>💪 추정 1RM</Text>
-                    <Text style={styles.doneSummaryItem}>벤치프레스 ~{Math.round(bw * m.bench)}kg  스쿼트 ~{Math.round(bw * m.squat)}kg  데드리프트 ~{Math.round(bw * m.deadlift)}kg</Text>
+                    <Text style={[styles.doneSummaryItem, { marginTop: 8, color: Colors.primary, fontWeight: '700' }]}>
+                      💪 1RM {isCustom ? '(입력값)' : '(추정값)'}
+                    </Text>
+                    <Text style={styles.doneSummaryItem}>
+                      벤치 {bench}kg  스쿼트 {squat}kg  데드 {deadlift}kg
+                    </Text>
                   </>
                 );
               })()}
@@ -597,6 +665,24 @@ const styles = StyleSheet.create({
   chipText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: '600' },
   chipTextSelected: { color: Colors.primary },
   focusHint: { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs },
+
+  // 1RM 입력 스타일
+  irmRow: { marginBottom: Spacing.md },
+  irmLabel: { fontSize: FontSize.md, fontWeight: '600', color: Colors.text, marginBottom: Spacing.xs },
+  irmInputRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  irmBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.primary,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  irmBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.primary },
+  irmInput: {
+    flex: 1, height: 44, backgroundColor: Colors.card, borderRadius: BorderRadius.md,
+    borderWidth: 1, borderColor: Colors.cardBorder, textAlign: 'center',
+    fontSize: FontSize.lg, fontWeight: '700', color: Colors.text,
+  },
+  irmUnit: { fontSize: FontSize.md, color: Colors.textSecondary, width: 24 },
+  irmHint: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.sm, textAlign: 'center' },
 
   // Frequency buttons (경쟁사 스타일 큰 버튼 리스트)
   freqButton: {
