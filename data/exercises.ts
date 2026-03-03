@@ -2174,20 +2174,19 @@ export function generateWorkoutPlan(
     (e) => targetParts.includes(e.bodyPart) && difficultyFilter.includes(e.difficulty)
   );
 
-  // Select exercises (5-7 based on goal)
-  const count = goal === 'lose' ? 6 : goal === 'gain' ? 5 : 6;
-  const selected = shuffleAndPick(available, Math.min(count, available.length));
-
-  // 목표별 세트/렙/휴식 설정 (NSCA + Kraemer & Ratamess 2004)
-  // lose:  65%1RM → 15rep×3set, 휴식 60s  (대사 자극·지구력 구간)
-  // gain:  75%1RM → 10rep×4set, 휴식 90s  (근비대 최적 구간, Schoenfeld 2016)
-  // maintain: 70%1RM → 12rep×3set, 휴식 75s (일반 건강·체력 유지)
-  const goalCfg = {
-    lose:     { sets: 3, reps: '15', restMult: 0.75 },
-    gain:     { sets: 4, reps: '10', restMult: 1.25 },
-    maintain: { sets: 3, reps: '12', restMult: 1.00 },
+  // 경험·목표별 볼륨 설정
+  // Schoenfeld 2017 meta-analysis (Sports Med): MEV 5-10세트/주, MAV 12-20세트/주
+  // RP Strength Volume Landmarks: 초보 MEV=4-6세트/주, 중급 MAV=12-20세트/주, 고급 16-20+세트/주
+  // NSCA 4th ed.: 초보 2-3세트, 중급 3-4세트, 고급 4-6세트
+  // → 세션당 총 세트: 초보 12세트(4×3) / 중급 15-20세트(5×3-4) / 고급 24-30세트(6×4-5)
+  const volumeCfg: Record<string, Record<string, { exercises: number; sets: number; reps: string; restMult: number }>> = {
+    beginner:     { lose: { exercises: 4, sets: 3, reps: '15', restMult: 0.75 }, gain: { exercises: 4, sets: 3, reps: '10', restMult: 1.25 }, maintain: { exercises: 4, sets: 3, reps: '12', restMult: 1.00 } },
+    intermediate: { lose: { exercises: 5, sets: 3, reps: '15', restMult: 0.75 }, gain: { exercises: 5, sets: 4, reps: '10', restMult: 1.25 }, maintain: { exercises: 5, sets: 3, reps: '12', restMult: 1.00 } },
+    advanced:     { lose: { exercises: 6, sets: 4, reps: '15', restMult: 0.75 }, gain: { exercises: 6, sets: 5, reps: '10', restMult: 1.25 }, maintain: { exercises: 6, sets: 4, reps: '12', restMult: 1.00 } },
   };
-  const cfg = goalCfg[goal];
+  const cfg = volumeCfg[experience]?.[goal] ?? volumeCfg.beginner.maintain;
+  const count = cfg.exercises;
+  const selected = shuffleAndPick(available, Math.min(count, available.length));
 
   const plan = selected.map((exercise) => {
     // 시간 기반 운동(초)은 기본값 유지, 나머지는 목표 렙으로 설정
@@ -2260,7 +2259,14 @@ export function generateSplitPlan(
            !blacklist.includes(e.id)
   );
 
-  const count = goal === 'lose' ? 6 : goal === 'gain' ? 5 : 6;
+  // 경험·목표별 볼륨 설정 (Schoenfeld 2017 / RP Strength / NSCA 4th ed.)
+  const volumeCfg: Record<string, Record<string, { exercises: number; sets: number; reps: string; restMult: number }>> = {
+    beginner:     { lose: { exercises: 4, sets: 3, reps: '15', restMult: 0.75 }, gain: { exercises: 4, sets: 3, reps: '10', restMult: 1.25 }, maintain: { exercises: 4, sets: 3, reps: '12', restMult: 1.00 } },
+    intermediate: { lose: { exercises: 5, sets: 3, reps: '15', restMult: 0.75 }, gain: { exercises: 5, sets: 4, reps: '10', restMult: 1.25 }, maintain: { exercises: 5, sets: 3, reps: '12', restMult: 1.00 } },
+    advanced:     { lose: { exercises: 6, sets: 4, reps: '15', restMult: 0.75 }, gain: { exercises: 6, sets: 5, reps: '10', restMult: 1.25 }, maintain: { exercises: 6, sets: 4, reps: '12', restMult: 1.00 } },
+  };
+  const cfg = volumeCfg[experience]?.[goal] ?? volumeCfg.beginner.maintain;
+  const count = cfg.exercises;
   let selected: Exercise[];
 
   if (options.savedExerciseIds && options.savedExerciseIds.length > 0) {
@@ -2289,17 +2295,6 @@ export function generateSplitPlan(
     );
     selected = sorted.slice(0, Math.min(count, sorted.length));
   }
-
-  // 목표별 세트/렙/휴식 설정 (NSCA + Kraemer & Ratamess 2004)
-  // lose:  65%1RM → 15rep×3set, 휴식 ×0.75  (대사 자극·지구력 구간)
-  // gain:  75%1RM → 10rep×4set, 휴식 ×1.25  (근비대 최적 구간, Schoenfeld 2016)
-  // maintain: 70%1RM → 12rep×3set, 휴식 ×1.00 (일반 건강·체력 유지)
-  const goalCfg = {
-    lose:     { sets: 3, reps: '15', restMult: 0.75 },
-    gain:     { sets: 4, reps: '10', restMult: 1.25 },
-    maintain: { sets: 3, reps: '12', restMult: 1.00 },
-  };
-  const cfg = goalCfg[goal];
 
   const plan = selected.map((exercise) => {
     const reps = exercise.defaultReps.includes('초') ? exercise.defaultReps : cfg.reps;
