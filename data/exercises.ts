@@ -2053,63 +2053,87 @@ export function getNextSplit(lastSplit: string | null): 'A' | 'B' | 'C' {
 
 // ===== 기본 무게 추천 알고리즘 =====
 
+/**
+ * 운동 기본 무게 계산
+ *
+ * 근거:
+ *  - NSCA Essentials 4th ed. Table 17.7: 목표별 %1RM (lose=65%, gain=75%, maintain=70%)
+ *  - Kraemer & Ratamess 2004 (ACSM, MSSE 36:674): 세트/렙/휴식 가이드라인
+ *  - Appleby et al. 2013 (PMC3761768): bench 기반 예측식 (R²=0.76~0.86)
+ *  - Strength Level 70만+ 리프트 데이터: 운동간 1RM 비율
+ *  - Borges & Lino 2009 (PubMed 18978614): 스쿼트 기반 하지 예측식
+ */
 export function getDefaultWeight(
   exercise: Exercise,
   experience: 'beginner' | 'intermediate' | 'advanced' = 'beginner',
-  oneRM?: { bench: number; squat: number; deadlift: number }
+  oneRM?: { bench: number; squat: number; deadlift: number },
+  goal: 'lose' | 'gain' | 'maintain' = 'maintain'
 ): number {
   if (['bodyweight', 'none', 'band'].includes(exercise.equipment)) return 0;
 
-  // 1RM 기반 계산 - 부위 × 장비별 비율표 (기준 리프트 대비 작업 무게 %)
-  // 산출 기준: 해당 운동 추정 1RM의 약 70%를 하이퍼트로피 작업 무게로 사용
+  // 목표별 작업 무게 비율 (NSCA Table 17.7)
+  // lose: 15RM ≈ 65%1RM  /  gain: 10RM ≈ 75%1RM  /  maintain: 12RM ≈ 70%1RM
+  const workRatio = goal === 'lose' ? 0.65 : goal === 'gain' ? 0.75 : 0.70;
+
+  // 반올림 단위: 바벨·머신 5kg / 덤벨·케이블 2.5kg
+  const roundTo = (exercise.equipment === 'dumbbell' || exercise.equipment === 'cable') ? 2.5 : 5;
+
   if (oneRM) {
-    // legs: squat 기준
+    // ── 하체: squat 기준 ──────────────────────────────────────────────────
+    // Strength Level: 레그프레스 ≈ squat×1.74 (intermediate), 레그ext ≈ squat×0.48 (Borges 2009)
+    // machine은 두 유형의 평균으로 squat×0.65 사용
     if (exercise.bodyPart === 'legs') {
-      const legsRatio =
-        exercise.equipment === 'barbell' ? 0.70  // 스쿼트 변형 - squat 1RM의 70%
-        : exercise.equipment === 'machine' ? 0.55 // 레그프레스/익스텐션
-        : exercise.equipment === 'cable'   ? 0.35 // 케이블 킥백 등
-        : 0.20;                                   // 덤벨 런지 등 (한쪽 기준)
-      return Math.round((oneRM.squat * legsRatio) / 2.5) * 2.5;
+      const legsExRatio =
+        exercise.equipment === 'barbell' ? 1.00   // 스쿼트 변형 = squat 1RM 그대로
+        : exercise.equipment === 'machine' ? 0.65  // 레그프레스/익스텐션/컬 혼합 평균
+        : exercise.equipment === 'cable'   ? 0.40  // 케이블 킥백·RDL
+        : 0.28;                                    // 덤벨 런지 (한 손 기준, Borges: 0.52×/2)
+      const w = oneRM.squat * legsExRatio * workRatio;
+      return Math.max(roundTo, Math.round(w / roundTo) * roundTo);
     }
 
-    // back·core: deadlift 기준 / 나머지(chest·arms·shoulder): bench 기준
+    // ── 등·코어: deadlift 기준 / 나머지: bench 기준 ──────────────────────
     const ref = (exercise.bodyPart === 'back' || exercise.bodyPart === 'core')
       ? oneRM.deadlift
       : oneRM.bench;
 
-    // 부위 × 장비 작업 무게 비율표
-    const ratioTable: Record<string, Partial<Record<string, number>>> = {
-      //          barbell  dumbbell  machine  cable
-      chest:    { barbell: 0.70, dumbbell: 0.35, machine: 0.45, cable: 0.40 },
-      // arms: 바벨컬 1RM ≈ bench의 35%, 작업무게 = 1RM×70% → bench×0.25
-      arms:     { barbell: 0.25, dumbbell: 0.15, machine: 0.20, cable: 0.20 },
-      // shoulder: OHP 1RM ≈ bench의 60%, 작업무게 → bench×0.42
-      shoulder: { barbell: 0.42, dumbbell: 0.22, machine: 0.28, cable: 0.25 },
-      // back: 바벨로우 1RM ≈ deadlift의 60%, 작업무게 → deadlift×0.42
-      back:     { barbell: 0.42, dumbbell: 0.22, machine: 0.35, cable: 0.30 },
-      core:     { barbell: 0.12, dumbbell: 0.08, machine: 0.12, cable: 0.12 },
+    // 운동 1RM 추정 비율 (reference lift 1RM 대비)
+    //
+    // chest  (bench 기준)  barbell=1.00 / dumbbell=0.50per arm / machine=0.90 / cable=0.40
+    // arms   (bench 기준)  barbell curl≈bench×0.47 (SL interm.), 트라이셉 푸시다운≈×0.58 → 평균 0.50
+    //                     dumbbell: DB컬 per arm ≈ 바벨컬×0.50 → bench×0.24
+    //                     cable: 트라이셉 푸시다운 기준 ≈ bench×0.50
+    // shoulder(bench 기준) OHP≈bench×0.63 (SL; 60-70% 범위), DB숄더프레스≈bench×0.42 (Appleby 2013)
+    //                     cable: 레터럴레이즈·페이스풀 ≈ bench×0.20
+    // back   (DL 기준)    바벨로우≈DL×0.55 (SL: 0.51-0.59), 케이블로우≈바벨로우 (SL 거의 동일)
+    //                     dumbbell row per arm ≈ barbell row×0.50 → DL×0.28
+    //                     lat pulldown machine ≈ DL×0.45
+    // core   (DL 기준)    전반적으로 가벼운 보조 운동
+    const exRatioTable: Record<string, Partial<Record<string, number>>> = {
+      chest:    { barbell: 1.00, dumbbell: 0.50, machine: 0.90, cable: 0.40 },
+      arms:     { barbell: 0.50, dumbbell: 0.24, machine: 0.45, cable: 0.50 },
+      shoulder: { barbell: 0.63, dumbbell: 0.42, machine: 0.55, cable: 0.20 },
+      back:     { barbell: 0.55, dumbbell: 0.28, machine: 0.45, cable: 0.55 },
+      core:     { barbell: 0.18, dumbbell: 0.12, machine: 0.18, cable: 0.18 },
     };
 
-    const row = ratioTable[exercise.bodyPart];
-    const ratio = row?.[exercise.equipment] ?? 0.30;
-    const w = Math.round((ref * ratio) / 2.5) * 2.5;
-    if (w > 0) return w;
+    const exRatio = exRatioTable[exercise.bodyPart]?.[exercise.equipment] ?? 0.40;
+    const w = ref * exRatio * workRatio;
+    return Math.max(roundTo, Math.round(w / roundTo) * roundTo);
   }
 
-  // 장비 × 부위별 초보자 기준 무게 (kg)
+  // ── 1RM 없을 때 fallback: 경험 × 장비 × 부위 기준 무게 ──────────────
+  const expMult = experience === 'intermediate' ? 1.3 : experience === 'advanced' ? 1.6 : 1.0;
   const baseWeights: Record<string, Partial<Record<BodyPart, number>>> = {
-    barbell: { chest: 30, back: 35, legs: 40, shoulder: 20, arms: 20, core: 20, cardio: 0 },
-    dumbbell: { chest: 10, back: 10, legs: 12, shoulder: 7, arms: 8, core: 8, cardio: 0 },
-    machine: { chest: 25, back: 30, legs: 40, shoulder: 15, arms: 15, core: 15, cardio: 0 },
-    cable:   { chest: 15, back: 20, legs: 25, shoulder: 12, arms: 12, core: 12, cardio: 0 },
+    barbell: { chest: 40, back: 50, legs: 60, shoulder: 30, arms: 25, core: 20, cardio: 0 },
+    dumbbell: { chest: 12.5, back: 12.5, legs: 15, shoulder: 10, arms: 10, core: 10, cardio: 0 },
+    machine: { chest: 35, back: 45, legs: 60, shoulder: 25, arms: 20, core: 20, cardio: 0 },
+    cable:   { chest: 20, back: 30, legs: 30, shoulder: 15, arms: 15, core: 15, cardio: 0 },
   };
-
-  const expMultiplier = experience === 'intermediate' ? 1.3 : experience === 'advanced' ? 1.6 : 1.0;
   const equipBase = baseWeights[exercise.equipment] ?? {};
-  const base = equipBase[exercise.bodyPart] ?? 15;
-  const raw = base * expMultiplier;
-  return Math.round(raw / 2.5) * 2.5; // 2.5kg 단위 반올림
+  const base = equipBase[exercise.bodyPart] ?? 20;
+  const raw = base * expMult;
+  return Math.max(roundTo, Math.round(raw / roundTo) * roundTo);
 }
 
 // ===== 운동 프로그램 생성 =====
@@ -2154,28 +2178,24 @@ export function generateWorkoutPlan(
   const count = goal === 'lose' ? 6 : goal === 'gain' ? 5 : 6;
   const selected = shuffleAndPick(available, Math.min(count, available.length));
 
-  // Adjust sets/reps based on goal
+  // 목표별 세트/렙/휴식 설정 (NSCA + Kraemer & Ratamess 2004)
+  // lose:  65%1RM → 15rep×3set, 휴식 60s  (대사 자극·지구력 구간)
+  // gain:  75%1RM → 10rep×4set, 휴식 90s  (근비대 최적 구간, Schoenfeld 2016)
+  // maintain: 70%1RM → 12rep×3set, 휴식 75s (일반 건강·체력 유지)
+  const goalCfg = {
+    lose:     { sets: 3, reps: '15', restMult: 0.75 },
+    gain:     { sets: 4, reps: '10', restMult: 1.25 },
+    maintain: { sets: 3, reps: '12', restMult: 1.00 },
+  };
+  const cfg = goalCfg[goal];
+
   const plan = selected.map((exercise) => {
-    let sets = exercise.defaultSets;
-    let reps = exercise.defaultReps;
+    // 시간 기반 운동(초)은 기본값 유지, 나머지는 목표 렙으로 설정
+    const reps = exercise.defaultReps.includes('초') ? exercise.defaultReps : cfg.reps;
+    const sets = cfg.sets;
+    const restSeconds = Math.round(exercise.restSeconds * cfg.restMult);
 
-    if (goal === 'lose') {
-      // More reps, shorter rest
-      sets = Math.max(3, sets);
-      if (!reps.includes('초')) {
-        const baseReps = parseInt(reps) || 12;
-        reps = String(Math.min(baseReps + 5, 20));
-      }
-    } else if (goal === 'gain') {
-      // More sets, lower reps, longer rest
-      sets = Math.min(sets + 1, 5);
-      if (!reps.includes('초') && !reps.includes('(')) {
-        const baseReps = parseInt(reps) || 12;
-        reps = String(Math.max(baseReps - 2, 6));
-      }
-    }
-
-    const defaultWeight = getDefaultWeight(exercise, experience);
+    const defaultWeight = getDefaultWeight(exercise, experience, undefined, goal);
     const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({
       weight: defaultWeight,
       reps,
@@ -2184,7 +2204,7 @@ export function generateWorkoutPlan(
     return {
       exercise,
       setDetails,
-      restSeconds: goal === 'lose' ? Math.max(30, exercise.restSeconds - 15) : exercise.restSeconds,
+      restSeconds,
     };
   });
 
@@ -2270,28 +2290,25 @@ export function generateSplitPlan(
     selected = sorted.slice(0, Math.min(count, sorted.length));
   }
 
-  // 목표별 세트/렙 조정 + 저장된 무게 적용
+  // 목표별 세트/렙/휴식 설정 (NSCA + Kraemer & Ratamess 2004)
+  // lose:  65%1RM → 15rep×3set, 휴식 ×0.75  (대사 자극·지구력 구간)
+  // gain:  75%1RM → 10rep×4set, 휴식 ×1.25  (근비대 최적 구간, Schoenfeld 2016)
+  // maintain: 70%1RM → 12rep×3set, 휴식 ×1.00 (일반 건강·체력 유지)
+  const goalCfg = {
+    lose:     { sets: 3, reps: '15', restMult: 0.75 },
+    gain:     { sets: 4, reps: '10', restMult: 1.25 },
+    maintain: { sets: 3, reps: '12', restMult: 1.00 },
+  };
+  const cfg = goalCfg[goal];
+
   const plan = selected.map((exercise) => {
-    let sets = exercise.defaultSets;
-    let reps = exercise.defaultReps;
+    const reps = exercise.defaultReps.includes('초') ? exercise.defaultReps : cfg.reps;
+    const sets = cfg.sets;
+    const restSeconds = Math.round(exercise.restSeconds * cfg.restMult);
 
-    if (goal === 'lose') {
-      sets = Math.max(3, sets);
-      if (!reps.includes('초')) {
-        const baseReps = parseInt(reps) || 12;
-        reps = String(Math.min(baseReps + 5, 20));
-      }
-    } else if (goal === 'gain') {
-      sets = Math.min(sets + 1, 5);
-      if (!reps.includes('초') && !reps.includes('(')) {
-        const baseReps = parseInt(reps) || 12;
-        reps = String(Math.max(baseReps - 2, 6));
-      }
-    }
-
-    // 저장된 무게 또는 스마트 기본 무게 (1RM 기반 우선)
+    // 저장된 무게 우선, 없으면 1RM 기반(혹은 fallback) 계산
     const savedWeight = options.savedWeights?.[exercise.id];
-    const defaultWeight = getDefaultWeight(exercise, experience, options.oneRM);
+    const defaultWeight = getDefaultWeight(exercise, experience, options.oneRM, goal);
     const weight = savedWeight ?? defaultWeight;
 
     const setDetails: SetDetail[] = Array.from({ length: sets }, () => ({
@@ -2302,7 +2319,7 @@ export function generateSplitPlan(
     return {
       exercise,
       setDetails,
-      restSeconds: goal === 'lose' ? Math.max(30, exercise.restSeconds - 15) : exercise.restSeconds,
+      restSeconds,
     };
   });
 

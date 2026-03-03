@@ -470,7 +470,7 @@ function WorkoutScreenInner() {
   const handleAddExercise = (ex: any) => {
     if (!plan) return;
     const savedWeight = exerciseWeights?.[ex.id];
-    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(ex, profile?.experience || 'beginner', profile?.estimatedOneRM) : (ex.equipment === 'bodyweight' ? 0 : 20));
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(ex, profile?.experience || 'beginner', profile?.estimatedOneRM, profile?.goal || 'maintain') : (ex.equipment === 'bodyweight' ? 0 : 20));
     const newItem = {
       exercise: ex,
       setDetails: Array.from({ length: ex.defaultSets }, () => ({ weight: defaultWeight, reps: ex.defaultReps })),
@@ -1330,7 +1330,7 @@ function WorkoutScreenInner() {
     if (!plan || swapIndex === null) return;
     const old = plan.exercises[swapIndex];
     const savedWeight = exerciseWeights?.[newEx.id];
-    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(newEx, profile?.experience || 'beginner', profile?.estimatedOneRM) : (newEx.equipment === 'bodyweight' ? 0 : 20));
+    const defaultWeight = savedWeight ?? (getDefaultWeight ? getDefaultWeight(newEx, profile?.experience || 'beginner', profile?.estimatedOneRM, profile?.goal || 'maintain') : (newEx.equipment === 'bodyweight' ? 0 : 20));
     const newSetDetails: SetDetail[] = Array.from({ length: newEx.defaultSets }, () => ({
       weight: defaultWeight,
       reps: newEx.defaultReps,
