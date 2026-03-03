@@ -2136,6 +2136,36 @@ export function getDefaultWeight(
   return Math.max(roundTo, Math.round(raw / roundTo) * roundTo);
 }
 
+/**
+ * 점진적 과부하 (Progressive Overload)
+ * NSCA Essentials 4th ed. + Schoenfeld 2016 기반
+ * - 초보: 매 2세션마다 +5kg (빠른 신경 적응)
+ * - 중급: 매 3세션마다 +5kg
+ * - 고급: 매 4세션마다 +5kg
+ * - 감량 목표: 증가 없음 (칼로리 적자 상태에서 근육 유지 우선)
+ * - 유지 목표: 매 2주기마다 1회 증가 (느린 점진)
+ *
+ * @param currentWeight  현재 사용 무게 (kg)
+ * @param completedSessions 오늘 포함 완료 세션 수
+ * @returns 다음 세션에 사용할 무게 (kg)
+ */
+export function applyProgressiveOverload(
+  currentWeight: number,
+  completedSessions: number,
+  experience: 'beginner' | 'intermediate' | 'advanced' = 'beginner',
+  goal: 'lose' | 'gain' | 'maintain' = 'maintain',
+): number {
+  if (currentWeight === 0 || goal === 'lose') return currentWeight;
+  const sessionInterval = experience === 'beginner' ? 2 : experience === 'intermediate' ? 3 : 4;
+  if (completedSessions % sessionInterval !== 0) return currentWeight;
+  // 유지 목표: 2 주기마다 1회만 증가
+  if (goal === 'maintain') {
+    const intervals = completedSessions / sessionInterval;
+    if (intervals % 2 !== 0) return currentWeight;
+  }
+  return Math.round((currentWeight + 5) / 5) * 5;
+}
+
 // ===== 운동 프로그램 생성 =====
 
 export interface SetDetail {

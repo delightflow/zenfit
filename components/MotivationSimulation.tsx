@@ -7,53 +7,34 @@ interface MotivationSimulationProps {
   goal: 'lose' | 'gain' | 'maintain';
   currentWeight: number;
   targetWeight: number;
+  workoutDays?: number[];   // 실제 스케줄 요일 (0=일 ~ 6=토)
+  completedSessions?: number; // 총 완료 세션 수
 }
 
-// Research-based habit statistics
-function getSkipConsequences(streak: number) {
-  // Based on habit science: missing once doubles the chance of missing again
-  const skipChain = [
-    { days: 1, nextSkipChance: 62, label: '내일도 빠질 확률' },
-    { days: 3, nextSkipChance: 78, label: '3일 연속 빠질 확률' },
-    { days: 7, nextSkipChance: 91, label: '1주일 포기 확률' },
-  ];
+/**
+ * 실제 운동 스케줄 기반 체중/체력 예측
+ * weeklyFreq: 실제 주당 운동 횟수로 진행 속도 조정
+ */
+function buildProjections(
+  goal: string,
+  currentWeight: number,
+  targetWeight: number,
+  weeklyFreq: number,
+) {
+  // 주 5회 기준 체중 변화: 감량 -0.5kg/주, 증량 +0.3kg/주
+  const baseWeekly = goal === 'lose' ? -0.5 : goal === 'gain' ? 0.3 : 0;
+  const adjusted = baseWeekly * (weeklyFreq / 5); // 실제 빈도로 조정
 
-  const streakLoss = streak; // Lose entire streak
-  const habitResetDays = Math.max(21, Math.round(streak * 0.7)); // Days to rebuild habit
+  const proj1w = Math.round((currentWeight + adjusted) * 10) / 10;
+  const proj1m = Math.round((currentWeight + adjusted * 4) * 10) / 10;
+  const proj3m = Math.round((currentWeight + adjusted * 12) * 10) / 10;
 
-  return { skipChain, streakLoss, habitResetDays };
-}
-
-function getKeepGoingBenefits(streak: number, goal: string, currentWeight: number, targetWeight: number) {
-  const newStreak = streak + 1;
-
-  // Weekly/monthly projections
   const weightDiff = targetWeight - currentWeight;
-  const weeklyChange = goal === 'lose' ? -0.5 : goal === 'gain' ? 0.3 : 0;
-  const monthlyChange = weeklyChange * 4;
-
-  const projectedWeight1w = Math.round((currentWeight + weeklyChange) * 10) / 10;
-  const projectedWeight1m = Math.round((currentWeight + monthlyChange) * 10) / 10;
-  const projectedWeight3m = Math.round((currentWeight + monthlyChange * 3) * 10) / 10;
-
-  // Fitness improvement estimates
-  const strengthGain1w = 3; // % strength increase per week (beginner gains)
-  const endurance1m = 15; // % endurance improvement in 1 month
-
-  // Milestone calculation
-  const daysToGoal = weightDiff !== 0
-    ? Math.abs(Math.round(weightDiff / (weeklyChange / 7)))
+  const daysToGoal = adjusted !== 0 && weightDiff !== 0
+    ? Math.abs(Math.round(weightDiff / (adjusted / 7)))
     : 0;
 
-  return {
-    newStreak,
-    projectedWeight1w,
-    projectedWeight1m,
-    projectedWeight3m,
-    strengthGain1w,
-    endurance1m,
-    daysToGoal,
-  };
+  return { proj1w, proj1m, proj3m, daysToGoal };
 }
 
 export default function MotivationSimulation({
@@ -62,196 +43,131 @@ export default function MotivationSimulation({
   goal,
   currentWeight,
   targetWeight,
+  workoutDays = [1, 2, 3, 4, 5],
+  completedSessions = 0,
 }: MotivationSimulationProps) {
+  const weeklyFreq = workoutDays.length || 3;
+  const { proj1w, proj1m, proj3m, daysToGoal } = buildProjections(
+    goal, currentWeight, targetWeight, weeklyFreq,
+  );
+  const habitResetDays = Math.max(21, Math.round(streak * 0.7));
+
+  // ── 운동 완료 후: 긍정 강화 ─────────────────────────────────────────────
   if (todayCompleted) {
-    // Show positive reinforcement after completing workout
-    const benefits = getKeepGoingBenefits(streak, goal, currentWeight, targetWeight);
     return (
       <View style={styles.container}>
-        <Text style={styles.sectionTitle}>오늘의 성과 시뮬레이션</Text>
+        <Text style={styles.sectionTitle}>오늘의 성과</Text>
         <View style={styles.completedCard}>
           <Text style={styles.completedEmoji}>🏆</Text>
-          <Text style={styles.completedTitle}>잘했습니다!</Text>
-          <Text style={styles.completedText}>
-            오늘 운동으로 스트릭 {benefits.newStreak}일을 달성했어요
-          </Text>
-
-          <View style={styles.timelineContainer}>
-            <TimelineItem
-              icon="📅"
-              period="1주 후"
-              description={`체력 ~${benefits.strengthGain1w}% 향상`}
-              highlight={false}
-            />
-            <TimelineLine />
-            <TimelineItem
-              icon="📅"
-              period="1달 후"
-              description={goal !== 'maintain'
-                ? `예상 체중 ${benefits.projectedWeight1m}kg`
-                : `지구력 ~${benefits.endurance1m}% 향상`
-              }
-              highlight={false}
-            />
-            <TimelineLine />
-            <TimelineItem
-              icon="🎯"
-              period="3달 후"
-              description={goal !== 'maintain'
-                ? `예상 체중 ${benefits.projectedWeight3m}kg`
-                : '눈에 띄는 체형 변화'
-              }
-              highlight={true}
-            />
+          <Text style={styles.completedTitle}>잘했습니다! 스트릭 {streak}일</Text>
+          <View style={styles.completedRow}>
+            <PillStat label="1달 후" value={goal !== 'maintain' ? `${proj1m}kg` : '지구력 +15%'} positive />
+            <PillStat label="3달 후" value={goal !== 'maintain' ? `${proj3m}kg` : '체형 변화'} positive />
+            {daysToGoal > 0 && (
+              <PillStat label={`목표(${targetWeight}kg)`} value={`${daysToGoal}일`} positive />
+            )}
           </View>
+          <Text style={styles.scheduleNote}>주 {weeklyFreq}회 스케줄 기준</Text>
         </View>
       </View>
     );
   }
 
-  // Show consequences of skipping vs benefits of doing
-  const consequences = getSkipConsequences(streak);
-  const benefits = getKeepGoingBenefits(streak, goal, currentWeight, targetWeight);
-
+  // ── 운동 전: 좌우 비교 시뮬레이션 ──────────────────────────────────────
   return (
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>습관 시뮬레이션</Text>
+      <View style={styles.comparisonCard}>
+        {/* 왼쪽: 안 하면 */}
+        <View style={styles.leftCol}>
+          <Text style={styles.headerSkip}>😰 안 하면</Text>
 
-      {/* SKIP PATH - Red/Warning */}
-      <View style={styles.skipCard}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.skipIcon}>😰</Text>
-          <Text style={styles.skipTitle}>오늘 빠지면...</Text>
+          {streak > 0 && (
+            <Row label="스트릭" value={`🔥${streak}일 초기화`} danger />
+          )}
+          <Row label="내일 빠질 확률" value="62%" danger />
+          <Row label="3일 연속" value="78%" danger />
+          <Row label="1주 포기" value="91%" danger />
+          <Row label="습관 재형성" value={`${habitResetDays}일`} danger />
         </View>
 
-        {streak > 0 && (
-          <View style={styles.consequenceRow}>
-            <Text style={styles.consequenceIcon}>🔥→💨</Text>
-            <Text style={styles.consequenceText}>
-              <Text style={styles.streakLoss}>{consequences.streakLoss}일</Text> 스트릭 초기화
-            </Text>
-          </View>
-        )}
+        <View style={styles.divider} />
 
-        {consequences.skipChain.map((item, i) => (
-          <View key={i} style={styles.consequenceRow}>
-            <View style={[styles.probabilityBar, { width: `${item.nextSkipChance}%` }]}>
-              <Text style={styles.probabilityText}>
-                {item.label}: {item.nextSkipChance}%
-              </Text>
-            </View>
-          </View>
-        ))}
+        {/* 오른쪽: 하면! */}
+        <View style={styles.rightCol}>
+          <Text style={styles.headerDo}>💪 하면!</Text>
 
-        <View style={styles.consequenceRow}>
-          <Text style={styles.consequenceIcon}>📉</Text>
-          <Text style={styles.consequenceText}>
-            습관 재형성까지 <Text style={styles.streakLoss}>{consequences.habitResetDays}일</Text> 필요
-          </Text>
-        </View>
-
-        <View style={styles.bottomLine}>
-          <Text style={styles.bottomLineText}>
-            연구 결과: 1일 빠지면 다음날 빠질 확률이 2배 증가합니다
-          </Text>
+          <Row label="스트릭" value={`🔥${streak + 1}일`} positive />
+          <Row
+            label="1주 후"
+            value={goal !== 'maintain' ? `${proj1w}kg` : '체력 +3%'}
+            positive
+          />
+          <Row
+            label="1달 후"
+            value={goal !== 'maintain' ? `${proj1m}kg` : '지구력 +15%'}
+            positive
+          />
+          <Row
+            label="3달 후"
+            value={goal !== 'maintain' ? `${proj3m}kg` : '체형 변화'}
+            positive
+          />
+          {daysToGoal > 0 && (
+            <Row label={`목표 D-`} value={`${daysToGoal}일`} positive />
+          )}
         </View>
       </View>
-
-      {/* KEEP GOING PATH - Green/Success */}
-      <View style={styles.keepCard}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.keepIcon}>💪</Text>
-          <Text style={styles.keepTitle}>오늘 하면!</Text>
-        </View>
-
-        <View style={styles.consequenceRow}>
-          <Text style={styles.consequenceIcon}>🔥</Text>
-          <Text style={styles.keepText}>
-            스트릭 <Text style={styles.streakGain}>{benefits.newStreak}일</Text> 달성!
-          </Text>
-        </View>
-
-        <View style={styles.timelineContainer}>
-          <TimelineItem
-            icon="1W"
-            period="1주 후"
-            description={goal !== 'maintain'
-              ? `예상 ${benefits.projectedWeight1w}kg (${benefits.projectedWeight1w - currentWeight > 0 ? '+' : ''}${(benefits.projectedWeight1w - currentWeight).toFixed(1)}kg)`
-              : `체력 ~${benefits.strengthGain1w}% 향상`
-            }
-            highlight={false}
-          />
-          <TimelineLine positive />
-          <TimelineItem
-            icon="1M"
-            period="1달 후"
-            description={goal !== 'maintain'
-              ? `예상 ${benefits.projectedWeight1m}kg`
-              : `지구력 ~${benefits.endurance1m}% 향상`
-            }
-            highlight={false}
-          />
-          <TimelineLine positive />
-          <TimelineItem
-            icon="3M"
-            period="3달 후"
-            description={goal !== 'maintain'
-              ? `예상 ${benefits.projectedWeight3m}kg`
-              : '눈에 띄는 체형 변화'
-            }
-            highlight={true}
-          />
-        </View>
-
-        {benefits.daysToGoal > 0 && (
-          <View style={styles.goalEstimate}>
-            <Text style={styles.goalEstimateText}>
-              🎯 목표 체중({targetWeight}kg)까지 약 <Text style={styles.streakGain}>{benefits.daysToGoal}일</Text>
-            </Text>
-          </View>
-        )}
-      </View>
+      <Text style={styles.footnote}>
+        주 {weeklyFreq}회 스케줄 기준 · 1일 빠지면 다음날 빠질 확률 2배 (habit science)
+      </Text>
     </View>
   );
 }
 
-function TimelineItem({ icon, period, description, highlight }: {
-  icon: string;
-  period: string;
-  description: string;
-  highlight: boolean;
+function Row({
+  label,
+  value,
+  danger,
+  positive,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+  positive?: boolean;
 }) {
   return (
-    <View style={[styles.timelineItem, highlight && styles.timelineItemHighlight]}>
-      <View style={[styles.timelineDot, highlight && styles.timelineDotHighlight]}>
-        <Text style={styles.timelineDotText}>{icon}</Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.timelinePeriod, highlight && { color: Colors.primary }]}>{period}</Text>
-        <Text style={styles.timelineDesc}>{description}</Text>
-      </View>
+    <View style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={[styles.rowValue, danger && styles.valueDanger, positive && styles.valuePositive]}>
+        {value}
+      </Text>
     </View>
   );
 }
 
-function TimelineLine({ positive }: { positive?: boolean }) {
+function PillStat({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
   return (
-    <View style={[styles.timelineLine, positive ? styles.timelineLinePositive : styles.timelineLineNeutral]} />
+    <View style={[styles.pill, positive && styles.pillPositive]}>
+      <Text style={styles.pillLabel}>{label}</Text>
+      <Text style={[styles.pillValue, positive && styles.pillValuePositive]}>{value}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     marginHorizontal: Spacing.lg,
+    marginTop: Spacing.lg,
   },
   sectionTitle: {
     fontSize: FontSize.lg,
     fontWeight: '700',
     color: Colors.text,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
 
-  // Completed state
+  // ── 완료 상태 ──────────────────────────────────────────────────────────
   completedCard: {
     backgroundColor: Colors.card,
     borderRadius: BorderRadius.lg,
@@ -260,125 +176,113 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary + '40',
     alignItems: 'center',
   },
-  completedEmoji: { fontSize: 40, marginBottom: Spacing.sm },
-  completedTitle: { fontSize: FontSize.xl, fontWeight: '800', color: Colors.primary },
-  completedText: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing.xs, marginBottom: Spacing.lg },
-
-  // Skip card
-  skipCard: {
-    backgroundColor: Colors.card,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.accent + '40',
+  completedEmoji: { fontSize: 32, marginBottom: Spacing.xs },
+  completedTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.primary,
     marginBottom: Spacing.md,
   },
-  cardHeader: {
+  completedRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  skipIcon: { fontSize: 24 },
-  skipTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.accent },
-
-  consequenceRow: {
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     marginBottom: Spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
   },
-  consequenceIcon: { fontSize: 16, width: 28 },
-  consequenceText: { fontSize: FontSize.sm, color: Colors.textSecondary, flex: 1 },
-  streakLoss: { color: Colors.accent, fontWeight: '700' },
-
-  probabilityBar: {
-    backgroundColor: Colors.accent + '20',
-    borderRadius: BorderRadius.sm,
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.accent,
-    minWidth: 100,
-  },
-  probabilityText: {
-    fontSize: FontSize.xs,
-    color: Colors.accent,
-    fontWeight: '600',
-  },
-
-  bottomLine: {
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surface,
-  },
-  bottomLineText: {
+  scheduleNote: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
-    fontStyle: 'italic',
+    marginTop: Spacing.xs,
   },
 
-  // Keep card
-  keepCard: {
+  // ── 좌우 비교 카드 ──────────────────────────────────────────────────────
+  comparisonCard: {
+    flexDirection: 'row',
     backgroundColor: Colors.card,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: Colors.primary + '40',
+    borderColor: Colors.surface,
   },
-  keepIcon: { fontSize: 24 },
-  keepTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.primary },
-  keepText: { fontSize: FontSize.sm, color: Colors.textSecondary, flex: 1 },
-  streakGain: { color: Colors.primary, fontWeight: '700' },
-
-  // Timeline
-  timelineContainer: {
-    marginTop: Spacing.md,
-    paddingLeft: Spacing.xs,
+  leftCol: {
+    flex: 1,
+    padding: Spacing.md,
+    backgroundColor: Colors.accent + '08',
   },
-  timelineItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingVertical: Spacing.xs,
+  rightCol: {
+    flex: 1,
+    padding: Spacing.md,
+    backgroundColor: Colors.primary + '08',
   },
-  timelineItemHighlight: {
-    backgroundColor: Colors.primary + '10',
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.sm,
-  },
-  timelineDot: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  divider: {
+    width: 1,
     backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  timelineDotHighlight: {
-    backgroundColor: Colors.primary + '30',
+  headerSkip: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.accent,
+    marginBottom: Spacing.sm,
   },
-  timelineDotText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700' },
-  timelinePeriod: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
-  timelineDesc: { fontSize: FontSize.xs, color: Colors.textMuted },
-  timelineLine: {
-    width: 2,
-    height: 16,
-    marginLeft: 15,
+  headerDo: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: Spacing.sm,
   },
-  timelineLineNeutral: { backgroundColor: Colors.surface },
-  timelineLinePositive: { backgroundColor: Colors.primary + '40' },
 
-  goalEstimate: {
-    marginTop: Spacing.md,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.primary + '20',
+  // ── Row ──────────────────────────────────────────────────────────────
+  row: {
+    marginBottom: Spacing.xs + 2,
   },
-  goalEstimateText: {
+  rowLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+  },
+  rowValue: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  valueDanger: {
+    color: Colors.accent,
+  },
+  valuePositive: {
+    color: Colors.primary,
+  },
+
+  // ── Pill ─────────────────────────────────────────────────────────────
+  pill: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    alignItems: 'center',
+    minWidth: 70,
+  },
+  pillPositive: {
+    backgroundColor: Colors.primary + '20',
+  },
+  pillLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+  },
+  pillValue: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  pillValuePositive: {
+    color: Colors.primary,
+  },
+
+  // ── 각주 ─────────────────────────────────────────────────────────────
+  footnote: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
     textAlign: 'center',
+    marginTop: Spacing.sm,
+    fontStyle: 'italic',
   },
 });

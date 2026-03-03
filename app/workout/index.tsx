@@ -34,7 +34,7 @@ try {
 }
 
 let generateWorkoutPlan: any, generateSplitPlan: any, getRecommendedParts: any, getNextSplit: any, allExercises: any;
-let BODY_PART_LABELS: any, BODY_PART_EMOJI: any, SPLIT_DEFS: any, getDefaultWeight: any;
+let BODY_PART_LABELS: any, BODY_PART_EMOJI: any, SPLIT_DEFS: any, getDefaultWeight: any, applyProgressiveOverload: any;
 try {
   const data = require('../../data/exercises');
   generateWorkoutPlan = data.generateWorkoutPlan;
@@ -42,6 +42,7 @@ try {
   getRecommendedParts = data.getRecommendedParts;
   getNextSplit = data.getNextSplit;
   getDefaultWeight = data.getDefaultWeight;
+  applyProgressiveOverload = data.applyProgressiveOverload;
   allExercises = data.exercises;
   BODY_PART_LABELS = data.BODY_PART_LABELS;
   BODY_PART_EMOJI = data.BODY_PART_EMOJI;
@@ -380,6 +381,7 @@ function WorkoutScreenInner() {
   const profile = useStore((s: any) => s.profile);
   const completeToday = useStore((s: any) => s.completeToday);
   const addWorkoutLog = useStore((s: any) => s.addWorkoutLog);
+  const workoutLogs = useStore((s: any) => s.workoutLogs);
   const lastSplit = useStore((s: any) => s.lastSplit);
   const splitPlans = useStore((s: any) => s.splitPlans);
   const exerciseWeights = useStore((s: any) => s.exerciseWeights);
@@ -1307,6 +1309,21 @@ function WorkoutScreenInner() {
       duration,
       calories: plan.estimatedCalories,
     });
+
+    // ── 점진적 과부하 적용 (NSCA Progressive Overload) ──────────────────
+    // 이번 세션까지 포함한 완료 횟수로 다음 세션 무게를 결정
+    if (plan && applyProgressiveOverload) {
+      const completedCount = (workoutLogs?.filter((l: any) => l.completed).length ?? 0) + 1;
+      const experience = profile?.experience ?? 'beginner';
+      const goal = profile?.goal ?? 'maintain';
+      const progressedWeights: Record<string, number> = {};
+      for (const item of plan.exercises) {
+        const w = item.setDetails[0]?.weight ?? 0;
+        progressedWeights[item.exercise.id] = applyProgressiveOverload(w, completedCount, experience, goal);
+      }
+      updateExerciseWeights(progressedWeights);
+    }
+    // ────────────────────────────────────────────────────────────────────
 
     if (voiceEnabled && !coachingActive) {
       playCountAudio(PHRASE_SOUND_SOURCES.set_complete);
