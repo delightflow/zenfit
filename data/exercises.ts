@@ -2060,22 +2060,41 @@ export function getDefaultWeight(
 ): number {
   if (['bodyweight', 'none', 'band'].includes(exercise.equipment)) return 0;
 
-  // 1RM 기반 계산 (1RM의 55%를 작업 무게로)
+  // 1RM 기반 계산 - 부위 × 장비별 비율표 (기준 리프트 대비 작업 무게 %)
+  // 산출 기준: 해당 운동 추정 1RM의 약 70%를 하이퍼트로피 작업 무게로 사용
   if (oneRM) {
-    const ratio = 0.55;
-    let ref: number | null = null;
-    if (exercise.bodyPart === 'chest' || exercise.bodyPart === 'arms') {
-      ref = oneRM.bench;
-    } else if (exercise.bodyPart === 'legs') {
-      ref = exercise.equipment === 'barbell' ? oneRM.squat : oneRM.squat * 0.4;
-    } else if (exercise.bodyPart === 'back' || exercise.bodyPart === 'core') {
-      ref = oneRM.deadlift * 0.5;
-    } else if (exercise.bodyPart === 'shoulder') {
-      ref = oneRM.bench * 0.45;
+    // legs: squat 기준
+    if (exercise.bodyPart === 'legs') {
+      const legsRatio =
+        exercise.equipment === 'barbell' ? 0.70  // 스쿼트 변형 - squat 1RM의 70%
+        : exercise.equipment === 'machine' ? 0.55 // 레그프레스/익스텐션
+        : exercise.equipment === 'cable'   ? 0.35 // 케이블 킥백 등
+        : 0.20;                                   // 덤벨 런지 등 (한쪽 기준)
+      return Math.round((oneRM.squat * legsRatio) / 2.5) * 2.5;
     }
-    if (ref !== null && ref > 0) {
-      return Math.round((ref * ratio) / 2.5) * 2.5;
-    }
+
+    // back·core: deadlift 기준 / 나머지(chest·arms·shoulder): bench 기준
+    const ref = (exercise.bodyPart === 'back' || exercise.bodyPart === 'core')
+      ? oneRM.deadlift
+      : oneRM.bench;
+
+    // 부위 × 장비 작업 무게 비율표
+    const ratioTable: Record<string, Partial<Record<string, number>>> = {
+      //          barbell  dumbbell  machine  cable
+      chest:    { barbell: 0.70, dumbbell: 0.35, machine: 0.45, cable: 0.40 },
+      // arms: 바벨컬 1RM ≈ bench의 35%, 작업무게 = 1RM×70% → bench×0.25
+      arms:     { barbell: 0.25, dumbbell: 0.15, machine: 0.20, cable: 0.20 },
+      // shoulder: OHP 1RM ≈ bench의 60%, 작업무게 → bench×0.42
+      shoulder: { barbell: 0.42, dumbbell: 0.22, machine: 0.28, cable: 0.25 },
+      // back: 바벨로우 1RM ≈ deadlift의 60%, 작업무게 → deadlift×0.42
+      back:     { barbell: 0.42, dumbbell: 0.22, machine: 0.35, cable: 0.30 },
+      core:     { barbell: 0.12, dumbbell: 0.08, machine: 0.12, cable: 0.12 },
+    };
+
+    const row = ratioTable[exercise.bodyPart];
+    const ratio = row?.[exercise.equipment] ?? 0.30;
+    const w = Math.round((ref * ratio) / 2.5) * 2.5;
+    if (w > 0) return w;
   }
 
   // 장비 × 부위별 초보자 기준 무게 (kg)
