@@ -2075,8 +2075,8 @@ export function getDefaultWeight(
   // lose: 15RM ≈ 65%1RM  /  gain: 10RM ≈ 75%1RM  /  maintain: 12RM ≈ 70%1RM
   const workRatio = goal === 'lose' ? 0.65 : goal === 'gain' ? 0.75 : 0.70;
 
-  // 반올림 단위: 바벨·머신 5kg / 덤벨·케이블 2.5kg
-  const roundTo = (exercise.equipment === 'dumbbell' || exercise.equipment === 'cable') ? 2.5 : 5;
+  // 반올림 단위: 모든 장비 5kg (30, 35 같은 깔끔한 값)
+  const roundTo = 5;
 
   if (oneRM) {
     // ── 하체: squat 기준 ──────────────────────────────────────────────────
@@ -2126,7 +2126,7 @@ export function getDefaultWeight(
   const expMult = experience === 'intermediate' ? 1.3 : experience === 'advanced' ? 1.6 : 1.0;
   const baseWeights: Record<string, Partial<Record<BodyPart, number>>> = {
     barbell: { chest: 40, back: 50, legs: 60, shoulder: 30, arms: 25, core: 20, cardio: 0 },
-    dumbbell: { chest: 12.5, back: 12.5, legs: 15, shoulder: 10, arms: 10, core: 10, cardio: 0 },
+    dumbbell: { chest: 15, back: 15, legs: 15, shoulder: 10, arms: 10, core: 10, cardio: 0 },
     machine: { chest: 35, back: 45, legs: 60, shoulder: 25, arms: 20, core: 20, cardio: 0 },
     cable:   { chest: 20, back: 30, legs: 30, shoulder: 15, arms: 15, core: 15, cardio: 0 },
   };
